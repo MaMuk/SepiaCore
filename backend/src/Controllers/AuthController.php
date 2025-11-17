@@ -4,7 +4,7 @@ namespace SepiaCore\Controllers;
 
 use Exception;
 use Flight;
-use SepiaCoreUtilities\RateLimiter;
+use SepiaCore\Utilities\RateLimiter;
 
 class AuthController extends BaseController
 {

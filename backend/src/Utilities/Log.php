@@ -1,6 +1,6 @@
 <?php
 
-namespace SepiaCoreUtilities;
+namespace SepiaCore\Utilities;
 
 use Monolog\Logger;
 use Monolog\Handler\RotatingFileHandler;

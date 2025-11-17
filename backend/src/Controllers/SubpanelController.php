@@ -3,7 +3,7 @@
 namespace SepiaCore\Controllers;
 
 use Flight;
-use SepiaCoreUtilities\Log;
+use SepiaCore\Utilities\Log;
 
 class SubpanelController extends BaseController
 {

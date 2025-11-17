@@ -1,6 +1,6 @@
 <?php
 
-namespace SepiaCoreUtilities;
+namespace SepiaCore\Utilities;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Ramsey\Uuid\Uuid;

@@ -50,19 +50,6 @@ spl_autoload_register(function ($class) {
     }
 });
 
-// Custom autoloader for Controllers
-spl_autoload_register(function ($class) {
-    $baseNamespace = 'SepiaCore\\Controllers\\';
-    if (strpos($class, $baseNamespace) === 0) {
-        $relativeClass = str_replace($baseNamespace, '', $class);
-        $filePath = ROOT_DIR . '/src/Controllers/' . str_replace('\\', '/', $relativeClass) . '.php';
-
-        if (file_exists($filePath)) {
-            require_once $filePath;
-        }
-    }
-});
-
 // ==========================================
 // Global Variables
 // ==========================================

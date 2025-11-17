@@ -1,6 +1,6 @@
 <?php
 
-namespace SepiaCoreUtilities;
+namespace SepiaCore\Utilities;
 
 class ScriptSandbox
 {

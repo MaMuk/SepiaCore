@@ -4,7 +4,7 @@ namespace SepiaCore\Controllers;
 
 use Exception;
 use Flight;
-use SepiaCoreUtilities\Log;
+use SepiaCore\Utilities\Log;
 
 class EntityController extends BaseController
 {

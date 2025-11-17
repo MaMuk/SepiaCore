@@ -5,7 +5,7 @@ namespace SepiaCore\Controllers;
 use Exception;
 use Flight;
 use SepiaCore\Entities\BaseEntity;
-use SepiaCoreUtilities\Log;
+use SepiaCore\Utilities\Log;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
 use Twig\Environment;

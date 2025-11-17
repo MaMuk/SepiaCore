@@ -1,8 +1,8 @@
 <?php
 namespace SepiaCore\Entities;
 
-use SepiaCoreUtilities\Log;
-use SepiaCoreUtilities\ScriptSandbox;
+use SepiaCore\Utilities\Log;
+use SepiaCore\Utilities\ScriptSandbox;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
 use Ramsey\Uuid\Uuid;
