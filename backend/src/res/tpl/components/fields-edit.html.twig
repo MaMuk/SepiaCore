@@ -1,0 +1,51 @@
+{% macro render(name, field_definitions, value, relationship, formId) %}
+
+    {% set type = field_definitions[name]['type'] %}
+    {% set options = field_definitions[name]['options'] %}
+    {% set readonly = field_definitions[name]['readonly']? 'readonly': '' %}
+    <div class="mb-3">
+        <label for="{{ name }}" class="form-label">{{ name|title }}</label>
+        {% if type == 'textarea' %}
+            <textarea class="form-control" id="{{ name }}" name="{{ name }}" {{ readonly }}>{{ value }}</textarea>
+        {% elseif type == 'datetime' %}
+            <input type="datetime-local" class="form-control" id="{{ name }}" name="{{ name }}" value="{{ value }}"  {{ readonly }}>
+        {% elseif type == 'checkbox' %}
+            <input type="checkbox" class="form-check-input" id="{{ name }}" name="{{ name }}" {% if value %}checked{% endif %}  {{ readonly }}>
+        {% elseif type == 'select' %}
+            {% if options %}
+                <select id="{{ name }}" name="{{ name }}"  class="form-select" {{ readonly }}>
+                    {% for key, display_value in options %}
+                        <option value="{{ key }}" {% if key == value %} selected {% endif %}>{{ display_value }}</option>
+                    {% endfor %}
+                </select>
+            {% else %}
+                No Options
+            {% endif %}
+        {% elseif type == 'relationship' %}
+            <select id="{{ name }}" name="{{ name }}" class="field-edit-relationship" data-fid="{{ value }}" data-fentity="{{ field_definitions[name]['entity'] }}">
+                <option data-placeholder="true"></option>
+                <option value="{{ value }}" {% if value == relationship[name]['id'] %}selected {% endif %}>{{ relationship[name]['name'] }}</option>
+            </select>
+        {% elseif type == 'collection' %}
+            <div id="{{ formId }}-{{ name }}-wrapper" class="collection-wrapper">
+                {% set items = value is iterable ? value : [] %}
+                {% for idx, item in items %}
+                    <div class="input-group mb-2 collection-item">
+                        <input type="text" class="form-control" name="{{ name }}" value="{{ item }}" {{ readonly }}>
+                        <button type="button" class="btn btn-outline-danger btn-remove" onclick="this.parentNode.remove()">×</button>
+                    </div>
+                {% endfor %}
+                {% if items is empty %}
+                    <div class="input-group mb-2 collection-item">
+                        <input type="text" class="form-control" name="{{ name }}" value="" {{ readonly }}>
+                        <button type="button" class="btn btn-outline-danger btn-remove" onclick="this.parentNode.remove()">×</button>
+                    </div>
+                {% endif %}
+                <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addCollectionItem('{{ formId }}', '{{ name }}')">Add</button>
+            </div>
+
+        {% else %}
+            <input type="{{ type }}" class="form-control" id="{{ name }}" name="{{ name }}" value="{{ value }}" {{ readonly }}>
+        {% endif %}
+    </div>
+{% endmacro %}

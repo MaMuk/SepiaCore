@@ -1,0 +1,45 @@
+
+    <nav aria-label="Page navigation">
+        <ul class="pagination list-pagination">
+            {# Previous Button #}
+            <li class="page-item {{ pagination.page == 1 ? 'disabled' }}">
+                <a class="page-link"
+                   {#href="?page={{ pagination.page - 1 }}&limit={{ pagination.limit }}&sort={{ pagination.sortBy }}&order={{ pagination.sortOrder }}"#}
+                   href="?page={{ pagination.page - 1 }}"
+                   data-page="{{ pagination.page - 1 }}"
+                   data-limit="{{ pagination.limit }}"
+                   data-sort="{{ pagination.sortBy }}"
+                   data-order="{{ pagination.sortOrder }}"
+                   aria-label="Previous">
+                    <span aria-hidden="true">&laquo;</span>
+                </a>
+            </li>
+
+            {# Page Numbers #}
+            {% for i in 1..pagination.totalPages %}
+                <li class="page-item {{ i == pagination.page ? 'active' }}">
+                    <a class="page-link"
+                       {#href="?page={{ i }}&limit={{ pagination.limit }}&sort={{ pagination.sortBy }}&order={{ pagination.sortOrder }}"#}
+                       href="?page={{ i }}"
+                       data-page="{{ i }}"
+                       data-limit="{{ pagination.limit }}"
+                       data-sort="{{ pagination.sortBy }}"
+                       data-order="{{ pagination.sortOrder }}">{{ i }}</a>
+                </li>
+            {% endfor %}
+
+            {# Next Button #}
+            <li class="page-item {{ pagination.page == pagination.totalPages ? 'disabled' }}">
+                <a class="page-link"
+{#                   href="?page={{ pagination.page + 1 }}&limit={{ pagination.limit }}&sort={{ pagination.sortBy }}&order={{ pagination.sortOrder }}"#}
+                   href="?page={{ pagination.page + 1 }}"
+                   data-page="{{ pagination.page + 1 }}"
+                   data-limit="{{ pagination.limit }}"
+                   data-sort="{{ pagination.sortBy }}"
+                   data-order="{{ pagination.sortOrder }}"
+                   aria-label="Next">
+                    <span aria-hidden="true">&raquo;</span>
+                </a>
+            </li>
+        </ul>
+    </nav>

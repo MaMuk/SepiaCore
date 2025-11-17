@@ -1,0 +1,1220 @@
+// noinspection SpellCheckingInspection
+const apiFetch = window.apiFetch;
+const server = window.APP_STATE.server;
+const countTotalRecords = window.countTotalRecords;
+const loadMetadata = window.loadMetadata;
+const applyMetadataToUi = window.applyMetadataToUi;
+const excludedEntities = ['users', 'tokens', 'modulebuilder', 'dashboards', 'rawendpointdata'];
+
+function mbAttachEventListeners(){
+    const treeViewElements = document.getElementsByClassName("mb-tree-view");
+    const treeView = treeViewElements[0];
+    if(!document.getElementById('mb-jsoneditor-script')){
+        const jsonEditorScript = document.createElement('script');
+        jsonEditorScript.id = 'mb-jsoneditor-script';
+        jsonEditorScript.src = '/js/jsoneditor.min.js';
+        document.body.appendChild(jsonEditorScript);
+    }
+    if(!document.getElementById('mb-jsoneditor-css')){
+        const jsonEditorCSS = document.createElement('link');
+        jsonEditorCSS.id = 'mb-jsoneditor-css';
+        jsonEditorCSS.href = '/css/jsoneditor.min.css';
+        jsonEditorCSS.rel = 'stylesheet';
+        document.head.appendChild(jsonEditorCSS);
+    }
+    if(!document.getElementById('mb-aceeditor-script')){
+        const aceEditorScript = document.createElement('script');
+        aceEditorScript.id = 'mb-aceeditor-script';
+        aceEditorScript.src = '/js/ace/src-noconflict/ace.js';
+        document.body.appendChild(aceEditorScript);
+    }
+
+    treeView.querySelectorAll("a").forEach(link =>{
+        const entityElement = link.closest('li[data-mb-entity]');
+        let entity = '';
+        const action = link.getAttribute('data-mb-action');
+        if(entityElement){
+            entity = entityElement.getAttribute('data-mb-entity');
+        }else{
+            entity = "noEntity";
+        }
+        link.addEventListener('click', (evt)=>{
+            evt.preventDefault();
+            switch (action){
+                case 'fields':
+                    loadFieldEditor(entity);
+                    break;
+                case 'record':
+                case 'list':
+                case 'subpanels':
+                    loadViewEditor(action, entity);
+                    break;
+                case 'editRelationship':
+                    loadRelationshipEditor(entity);
+                    break;
+                case 'deleteEntity':
+                    deleteEntityView(entity);
+                    break;
+                case 'newModule':
+                    loadModuleCreator();
+                    break;
+                case 'newRelationship':
+                    loadRealtionshipCreator();
+                    break;
+                case 'deleteRelationship':
+                    deleteRelationshipView(entity);
+                    break;
+                case 'editNavigationEntities':
+                    loadNavigationEditor();
+                    break;
+                case 'hooks':
+                    loadHookEditor(entity);
+                    break;
+                default:
+                    alert(action +' is not a defined action')
+                    break;
+            }
+        });
+
+
+    });
+
+}
+function toggleTreeView(event) {
+
+    const targetLi = event.target.closest('li');
+    const nextUl = targetLi.querySelector('ul');
+    const targetAnchor = event.target.closest('a');
+    if (targetAnchor && targetAnchor.classList.contains('tree-delete-link')) {
+        return;
+    }
+    event.stopPropagation();
+
+
+    if (nextUl) {
+        nextUl.classList.toggle('collapse');
+        targetLi.classList.toggle('disclosure-open');
+        targetLi.classList.toggle('disclosure-closed');
+    }
+}
+
+
+
+function loadFieldEditor(entity) {
+    const fields = APP_STATE.metaData.entities[entity]['fields'];
+    const relateModules = getRelatableModules();
+    const mbContainer = document.getElementById("mb-content");
+
+    const typeOptions = ["text", "textarea", "datetime", "date", "select", "collection", "checkbox", "int", "float", "relationship", "uuid"];
+
+    mbContainer.innerHTML = `
+<div class="field-add w-100 container-fluid">
+    <div class="d-flex gap-2 pt-2 pb-2">
+        <input type="text" id="fieldNameInput" class="form-control" placeholder="Field name (lowercase, underscores)" />
+        <select id="fieldTypeSelect" class="form-control form-select">
+            ${typeOptions.map(type => `<option value="${type}">${type}</option>`).join('')}
+        </select>
+        <input type="button" id="addFieldBtn" class="btn btn-primary" value="Add Field">
+    </div>
+    <div class="pb-2">
+        <select id="relateEntity" class="form-select d-none">
+            <option value="" selected></option>
+            ${buildOptions(relateModules)}
+        </select>
+        <div id="selectOptionsContainer" class="d-none">
+            <div id="optionRows" class="mb-2"></div>
+            <button type="button" class="btn btn-sm btn-secondary" id="addOptionBtn">+ Add Option</button>
+        </div>
+    </div>
+</div>
+<div class="w-100 h-100">
+
+    <div id="jsoneditor" class="h-75"></div>
+    <div id="jsoneditorErrorContainer"></div>
+    <button class="btn btn-success mt-3 fieldEditorSave" id="fieldEditorSave">Save Fields</button>
+</div>`;
+
+    const schema = {
+        type: "object",
+        patternProperties: {
+            "^[a-z_]+$": {
+                type: "object",
+                required: ["type"],
+                additionalProperties: false,
+                properties: {
+                    type: {
+                        type: "string",
+                        enum: typeOptions
+                    },
+                    readonly: { type: "boolean" },
+                    entity: { type: "string" },
+                    options: { type: "object" }
+                },
+                allOf: [
+                    {
+                        if: { properties: { type: { const: "select" } } },
+                        then: { required: ["options"] }
+                    },
+                    {
+                        if: { properties: { type: { const: "relationship" } } },
+                        then: { required: ["entity"] }
+                    }
+                ]
+            }
+        },
+        additionalProperties: false
+    };
+
+    const editorContainer = document.getElementById('jsoneditor');
+    const options = {
+        name: entity,
+        mode: 'tree',
+        mainMenuBar: true,
+        navigationBar: false,
+        statusBar: false,
+        schema: schema,
+        enableSort: false,
+        enableTransform: false,
+        history: true,
+        allowSchemaSuggestions: true,
+        modes: ['code', 'tree', 'view'],
+        search: false,
+        onValidationError: function (errors){
+            document.getElementById('jsoneditorErrorContainer').innerHTML = '';
+            document.getElementById('jsoneditorErrorContainer').classList.remove('alert', 'alert-warning');
+
+            if (errors.length > 0) {
+                errors.forEach((error) => {
+                    let message = '';
+
+                    if (error.error.message === 'should be object' || error.error.message === "should have required property 'type'") {
+                        message += `<strong>${error.node.field}</strong> ${error.error.message}<br>`;
+                    } else if (error.error.message && errors.length <= 2) {
+                        message += `<strong>${error.node.field}</strong> ${error.error.message}<br>`;
+                    }
+                    if (message) {
+                        const errorElement = document.createElement('div');
+                        errorElement.innerHTML = message;
+                        document.getElementById('jsoneditorErrorContainer').appendChild(errorElement);
+                        document.getElementById('jsoneditorErrorContainer').classList.add('alert', 'alert-warning');
+                    }
+                });
+            }
+        }
+    };
+
+    window.jsonEditor = new JSONEditor(editorContainer, options);
+    window.jsonEditor.set(fields);
+
+    if (Object.keys(fields).length < 1) {
+        document.getElementById('jsoneditorErrorContainer').innerHTML = 'Fields Metadata is empty';
+        document.getElementById('jsoneditorErrorContainer').classList.add('alert', 'alert-warning');
+    }
+
+    document.getElementById('addFieldBtn').addEventListener('click', () => {
+        const nameInput = document.getElementById('fieldNameInput');
+        const typeSelect = document.getElementById('fieldTypeSelect');
+        const fieldName = nameInput.value.trim();
+        const fieldType = typeSelect.value;
+
+        // Validate field name
+        if (!/^[a-z_]+$/.test(fieldName)) {
+            alert('Field name must be lowercase letters and underscores only.');
+            return;
+        }
+
+        const currentData = window.jsonEditor.get();
+        if (currentData[fieldName]) {
+            alert('Field already exists.');
+            return;
+        }
+
+        const field = { type: fieldType };
+
+        // Handle relationship type
+        if (fieldType === 'relationship') {
+            const relatedEntity = document.getElementById('relateEntity').value;
+            if (!relatedEntity) {
+                alert('Please select an entity for the relationship.');
+                return;
+            }
+            field.entity = relatedEntity;
+        }
+
+        // Handle select type
+        if (fieldType === 'select') {
+            const labels = document.querySelectorAll('.option-label');
+            const values = document.querySelectorAll('.option-value');
+            const options = {};
+
+            for (let i = 0; i < labels.length; i++) {
+                const key = values[i].value.trim(); // Value = key
+                const val = labels[i].value.trim(); // Label = value
+
+                if (key !== '' || val !== '') {
+                    options[key] = val || key;
+                }
+            }
+
+            if (Object.keys(options).length === 0) {
+                alert('Add at least one option.');
+                return;
+            }
+
+            field.options = options;
+        }
+
+        // Add field to JSON editor
+        currentData[fieldName] = field;
+        window.jsonEditor.set(currentData);
+
+        // Clear inputs
+        nameInput.value = '';
+        typeSelect.selectedIndex = 0;
+        document.getElementById('relateEntity').value = '';
+        document.getElementById('optionRows').innerHTML = '';
+
+        // Hide conditional inputs
+        document.getElementById('relateEntity').classList.add('d-none');
+        document.getElementById('selectOptionsContainer').classList.add('d-none');
+    });
+    document.getElementById('fieldTypeSelect').addEventListener('change', (evt) => {
+        const relateEntity = document.getElementById('relateEntity');
+        const selectOptions = document.getElementById('selectOptionsContainer');
+
+        if(evt.target.value === 'relationship'){
+            relateEntity.classList.remove('d-none');
+            selectOptions.classList.add('d-none');
+        } else if (evt.target.value === 'select') {
+            relateEntity.classList.add('d-none');
+            selectOptions.classList.remove('d-none');
+        } else {
+            relateEntity.classList.add('d-none');
+            selectOptions.classList.add('d-none');
+        }
+    });
+    document.getElementById('addOptionBtn').addEventListener('click', () => {
+        const row = document.createElement('div');
+        row.className = 'd-flex gap-2 mb-1';
+        row.innerHTML = `
+        <input type="text" class="form-control form-control-sm option-label" placeholder="Label" />
+        <input type="text" class="form-control form-control-sm option-value" placeholder="Value" />
+        <button type="button" class="btn btn-sm btn-danger removeOptionBtn">&times;</button>
+    `;
+        document.getElementById('optionRows').appendChild(row);
+
+        row.querySelector('.removeOptionBtn').addEventListener('click', () => row.remove());
+    });
+    document.getElementById('fieldEditorSave').addEventListener('click', ()=>{
+        const updatedFields = window.jsonEditor.get();
+        saveFields(entity,updatedFields);
+    });
+}
+function loadViewEditor(view, entity) {
+    const activeEntity = entity;
+    const activeView = view;
+    const viewMeta = APP_STATE.metaData.entities[activeEntity].module_views[activeView]?? [];
+    const mbContainer = document.getElementById("mb-content");
+    mbContainer.innerHTML = `
+<div class="w-100 h-100">
+        <div id="jsoneditor" class="h-75"></div>
+        <div id="jsoneditorErrorContainer"></div>
+        <button class="btn btn-success mt-3 viewEditorSave" id="viewEditorSave">Save View</button>
+</div>`;
+
+    //todo: find view schema
+    /*const schema = {};*/
+    const editorContainer = document.getElementById('jsoneditor');
+    const options = {
+        name: activeView,
+        mode: 'tree',
+        mainMenuBar: true,
+        navigationBar: false,
+        statusBar: false,
+        //schema: schema,
+        enableSort: false,
+        enableTransform: false,
+        history: true,
+        allowSchemaSuggestions: true,
+        modes: ['code', 'tree', 'view'],
+        search: false,
+        onValidationError: function (errors){
+            //no validation exists now
+        }
+    };
+
+    window.jsonEditor = new JSONEditor(editorContainer, options);
+    window.jsonEditor.set(viewMeta);
+
+    if(viewMeta.length < 1){
+        document.getElementById('jsoneditorErrorContainer').innerHTML = 'View Metadata is empty';
+        document.getElementById('jsoneditorErrorContainer').classList.add('alert', 'alert-warning');
+    }
+
+    document.getElementById('viewEditorSave').addEventListener("click", ()=>{
+        saveView(activeEntity, activeView);
+    });
+
+}
+function loadHookEditor(entity){
+    const activeEntity = entity;
+    const mbContainer = document.getElementById("mb-content");
+    // List of events
+    const events = ["beforeAdd", "afterAdd", "beforeSave", "afterSave"];
+
+    // Example entity fields
+    const entityFields = ["id", "name", "createdAt", "updatedAt"];
+
+    // Example functions (placeholders)
+    const functionsList = ["log()", "validate()", "calculate()", "notify()"];
+
+    mbContainer.innerHTML = `
+        <div class="d-flex flex-column h-100 w-100">
+            <div class="mb-2">
+                <label>Select Event: </label>
+                <select id="hookEventSelect" class="form-select">
+                    ${events.map(e => `<option value="${e}">${e}</option>`).join("")}
+                </select>
+            </div>
+            <div class="d-flex flex-row flex-grow-1 gap-2">
+                <div class="flex-shrink-0" style="width:150px; border:1px solid #ccc; padding:5px; overflow:auto;">
+                    <h5>Fields</h5>
+                    ${entityFields.map(f => `<div class="entity-field" style="cursor:pointer;">${f}</div>`).join("")}
+                </div>
+                <div class="flex-grow-1" style="border:1px solid #ccc;">
+                    <div id="editor" style="width:100%; height:100%;">
+function int(t)
+	return t:byte(1)+t:byte(2)*0x100+t:byte(3)*0x10000+t:byte(4)*0x1000000
+end
+
+function num_args(func)
+	local dump = string.dump(func)
+	local offset, cursor = int(dump:sub(13)), offset + 26
+	--Get the params and var flag (whether there's a ... in the param)
+	return dump:sub(cursor):byte(), dump:sub(cursor+1):byte()
+end
+
+-- Usage:
+num_args(function(a,b,c,d, ...) end) -- return 4, 7
+
+-- Python styled string format operator
+local gm = debug.getmetatable("")
+
+gm.__mod=function(self, other)
+    if type(other) ~= "table" then other = {other} end
+    for i,v in ipairs(other) do other[i] = tostring(v) end
+    return self:format(unpack(other))
+end
+
+print([===[
+    blah blah %s, (%d %d)
+]===]%{"blah", num_args(int)})
+
+--[=[--
+table.maxn is deprecated, use # instead.
+--]=]--
+print(table.maxn{1,2,[4]=4,[8]=8}) -- outputs 8 instead of 2
+
+print(5 --[[ blah ]])
+
+                    </div>
+                </div>
+                <div class="flex-shrink-0" style="width:150px; border:1px solid #ccc; padding:5px; overflow:auto;">
+                    <h5>Functions</h5>
+                    ${functionsList.map(fn => `<div class="func-item" style="cursor:pointer;">${fn}</div>`).join("")}
+                </div>
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-success" id="hookEditorSave">Save Hook</button>
+                <button class="btn btn-primary" id="hookEditorTest">Test Hook</button>
+            </div>
+        </div>
+    `;
+    editor = ace.edit("editor");
+    editor.setTheme("ace/theme/crimson_editor");
+    editor.session.setMode("ace/mode/lua");
+    // Load existing script if any
+    const eventSelect = document.getElementById("hookEventSelect");
+    const loadEventScript = () => {
+        const selectedEvent = eventSelect.value;
+        const script = APP_STATE.metaData[activeEntity]?.[selectedEvent] || "";
+        editor.setValue(script, -1);
+    };
+
+    loadEventScript();
+
+    // Change event -> load script
+    eventSelect.addEventListener("change", loadEventScript);
+
+    // Clickable entity fields -> insert into code at cursor
+    document.querySelectorAll(".entity-field").forEach(el => {
+        el.addEventListener("click", () => {
+            const cursor = editor.getCursorPosition();
+            editor.session.insert(cursor, el.textContent);
+        });
+    });
+
+    // Clickable functions -> insert into code at cursor
+    document.querySelectorAll(".func-item").forEach(el => {
+        el.addEventListener("click", () => {
+            const cursor = editor.getCursorPosition();
+            editor.session.insert(cursor, el.textContent);
+        });
+    });
+
+    // Save button
+    document.getElementById("hookEditorSave").addEventListener("click", () => {
+        const selectedEvent = eventSelect.value;
+        const code = editor.getValue();
+        console.log("Save Hook:", activeEntity, selectedEvent, code);
+        // TODO: save to backend or APP_STATE
+    });
+
+    // Test button
+    document.getElementById("hookEditorTest").addEventListener("click", () => {
+        const code = editor.getValue();
+        console.log("Test Hook Code:", code);
+        // TODO: run test sandbox
+    });
+}
+function loadRelationshipEditor(relationship) {
+    const relationshipMeta = APP_STATE.metaData.relationships[relationship]?? [];
+    const mbContainer = document.getElementById("mb-content");
+    mbContainer.innerHTML = `
+<div class="w-100 h-100">
+        <div id="jsoneditor" class="h-75"></div>
+        <div id="jsoneditorErrorContainer"></div>
+        <button class="btn btn-success mt-3 relEditorSave" id="relEditorSave">Save Relationship</button>
+</div>`;
+    const editorContainer = document.getElementById('jsoneditor');
+    const options = {
+        name: relationship,
+        mode: 'code',
+        mainMenuBar: true,
+        navigationBar: false,
+        statusBar: false,
+        enableSort: false,
+        enableTransform: false,
+        history: true,
+        allowSchemaSuggestions: true,
+        modes: ['code', 'tree', 'view'],
+        search: false,
+        onChangeJSON: function (json) {
+            if (json.rel_name && json.rel_name !== currentRelName) {
+                currentRelName = json.rel_name;
+                window.jsonEditor.setName(json.rel_name);
+            }
+        }
+    };
+
+    window.jsonEditor = new JSONEditor(editorContainer, options,relationshipMeta);
+
+    if(relationshipMeta.length < 1){
+        document.getElementById('jsoneditorErrorContainer').innerHTML = 'View Relationship is empty';
+        document.getElementById('jsoneditorErrorContainer').classList.add('alert', 'alert-warning');
+    }
+
+    document.getElementById('relEditorSave').addEventListener("click", ()=>{
+        const relDef = window.jsonEditor.get();
+        saveRelationship(relDef);
+    });
+}
+function loadNavigationEditor(){
+    const mbContainer = document.getElementById("mb-content");
+    const navigationValues = Object.values(APP_STATE.metaData.navigation_entities);
+    const availableEntities = Object.fromEntries(
+        Object.keys(APP_STATE.metaData.entities)
+            .filter(entity =>
+                !navigationValues.includes(entity) &&
+                !excludedEntities.includes(entity)
+            )
+            .map((entity, idx) => [idx + 1, entity])
+    );
+    mbContainer.innerHTML = `
+    <div class="container mt-5">
+  <h3>Configure Navigation Entities</h3>
+  <div class="row mt-4 h-100">
+    <div class="col-md-6">
+      <h5>Available Entities</h5>
+      <div id="availableEntities" class="entity-list h-100">
+        <!-- Items added dynamically -->
+      </div>
+    </div>
+    <div class="col-md-6">
+      <h5>Entities in Navigation</h5>
+      <div id="navigationEntities" class="entity-list h-100">
+        <!-- Items added dynamically -->
+      </div>
+    </div>
+  </div>
+  <div class="mt-4">
+    <button class="btn btn-primary" id="submitNavigationButton">Save Navigation</button>
+  </div>
+</div>
+    `;
+    document.getElementById('availableEntities').addEventListener('dragover', handleDragOver);
+    document.getElementById('availableEntities').addEventListener('drop', (e) => handleDrop(e, 'available'));
+
+    document.getElementById('navigationEntities').addEventListener('dragover', handleDragOver);
+    document.getElementById('navigationEntities').addEventListener('drop', (e) => handleDrop(e, 'navigation'));
+
+    document.getElementById('submitNavigationButton').addEventListener('click', submitNavigation);
+
+    const container = document.getElementById('availableEntities');
+    for (const [id, label] of Object.entries(availableEntities)) {
+        const item = createEntityItem(id, label);
+        container.appendChild(item);
+    }
+    const container_2 = document.getElementById('navigationEntities');
+
+    for (const [id, label] of Object.entries(navigationValues)) {
+        const item = createEntityItem(id, label);
+        container_2.appendChild(item);
+    }
+    function createEntityItem(id, label) {
+        const item = document.createElement('div');
+        item.className = 'entity-item';
+        item.draggable = true;
+        item.dataset.id = id;
+        item.textContent = label;
+
+        item.addEventListener('dragstart', handleDragStart);
+        item.addEventListener('dragover', handleDragOverItem);
+        item.addEventListener('drop', handleDropOnItem);
+        item.addEventListener('dragend', handleDragEnd);
+
+        return item;
+    }
+    let draggedItem = null;
+
+    function handleDragStart(e) {
+        draggedItem = e.target;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => draggedItem.style.display = 'none', 0);
+    }
+    function handleDragEnd() {
+        if (draggedItem) draggedItem.style.display = '';
+        draggedItem = null;
+    }
+
+    function handleDragOver(e) {
+        e.preventDefault();
+        e.currentTarget.classList.add('drag-over');
+    }
+
+    function handleDrop(e, targetList) {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over');
+
+        const targetContainer = targetList === 'navigation'
+            ? document.getElementById('navigationEntities')
+            : document.getElementById('availableEntities');
+
+        if (draggedItem && !targetContainer.contains(draggedItem)) {
+            targetContainer.appendChild(draggedItem);
+        }
+    }
+    function handleDragOverItem(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+    function handleDropOnItem(e) {
+        e.preventDefault();
+        if (!draggedItem || draggedItem === e.target) return;
+
+        const container = e.target.parentNode;
+        const items = Array.from(container.children);
+        const dropIndex = items.indexOf(e.target);
+        const dragIndex = items.indexOf(draggedItem);
+
+        if (dragIndex < dropIndex) {
+            container.insertBefore(draggedItem, e.target.nextSibling);
+        } else {
+            container.insertBefore(draggedItem, e.target);
+        }
+    }
+    async function submitNavigation() {
+        const navContainer = document.getElementById('navigationEntities');
+        const items = navContainer.querySelectorAll('.entity-item');
+
+        const result = {};
+        items.forEach((item, index) => {
+            result[index + 1] = item.textContent;
+        });
+
+        try {
+            const response = await apiFetch(`${server}/modulebuilder/setNavigationEntities`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(result)
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to save navigation.');
+            }
+
+            alert('Navigation saved successfully!');
+            await loadMetadata();
+            applyMetadataToUi();
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An error occurred.');
+        }
+    }
+}
+function loadModuleCreator() {
+    const mbContainer = document.getElementById("mb-content");
+    mbContainer.innerHTML = `
+<div class="w-100">
+    <form id="entityCreateForm">
+
+  <div class="row g-3"> <!-- g-3 adds spacing between columns/rows -->
+    <!-- Entity Name -->
+    <div class="col-12 col-md-6">
+      <label for="entityName" class="form-label">Entity Name</label>
+      <input type="text" class="form-control" id="entityName" required>
+      <div id="entityNameHelp" class="form-text text-info d-none">
+        <ul class="mb-0">
+          <li>Must be between <strong>1 and 20 characters</strong> long.</li>
+          <li>Must <strong>not end with a space or a dot (.)</strong>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Table Name -->
+    <div class="col-12 col-md-6">
+      <label for="entityTableName" class="form-label">Entity Table Name</label>
+      <input type="text" class="form-control" id="entityTableName" required>
+    </div>
+
+    <!-- Class Name -->
+    <div class="col-12 col-md-6">
+      <label for="entityClassName" class="form-label">Entity Class Name</label>
+      <input type="text" class="form-control" disabled id="entityClassName" required>
+    </div>
+
+    <!-- Entity Type -->
+    <div class="col-12 col-md-6">
+      <label for="entityType" class="form-label">Entity Type</label>
+      <select class="form-select" id="entityType">
+        <option value="basic">Basic</option>
+        <option value="person">Person</option>
+      </select>
+    </div>
+
+    <!-- Field Table -->
+    <div class="col-12">
+      <label class="form-label">Entity Fields</label>
+      <table class="table table-bordered" id="fieldsTable">
+        <thead>
+          <tr>
+            <th>Field Name</th>
+            <th>Field Type</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="fieldsBody">
+          <!-- Default fields -->
+          <tr><td>id</td><td>text</td><td></td></tr>
+          <tr><td>name</td><td>text</td><td></td></tr>
+          <tr><td>date_created</td><td>datetime</td><td></td></tr>
+          <tr><td>date_modified</td><td>datetime</td><td></td></tr>
+          <tr><td>owner</td><td>text</td><td></td></tr>
+        </tbody>
+      </table>
+      <button class="btn btn-sm btn-outline-primary" id="addFieldBtn">Add Custom Field</button>
+    </div>
+
+    <!-- Submit -->
+    <div class="col-12">
+      <input type="submit" class="btn btn-outline-success" id="entityCreateButton" value="Create Entity">
+    </div>
+  </div>
+    </form>
+
+</div>
+    `;
+
+    const entityName = document.getElementById('entityName');
+    const entityTableName = document.getElementById('entityTableName');
+    const entityClassName = document.getElementById('entityClassName');
+    const entityType = document.getElementById('entityType');
+    const addFieldBtn = document.getElementById('addFieldBtn');
+    const fieldsBody = document.getElementById('fieldsBody');
+
+    function sanitizeInput(input) {
+        return input.replace(/[^a-zA-Z]/g, '');
+    }
+
+    entityName.addEventListener('input', () => {
+        const rawValue = entityName.value;
+        const cleanValue = sanitizeInput(rawValue);
+        if (rawValue !== cleanValue) {
+            entityName.value = cleanValue;
+        }
+
+        entityTableName.value = cleanValue.toLowerCase();
+
+        if (cleanValue.length > 0) {
+            entityClassName.value = cleanValue.charAt(0).toUpperCase() + cleanValue.slice(1).toLowerCase();
+        } else {
+            entityClassName.value = '';
+        }
+    });
+
+    entityTableName.addEventListener('input', () => {
+        const rawValue = entityTableName.value;
+        const cleanValue = sanitizeInput(rawValue);
+        if (rawValue !== cleanValue) {
+            entityTableName.value = cleanValue.toLowerCase();
+        }
+    });
+
+    addFieldBtn.addEventListener('click', () => {
+        const row = document.createElement('tr');
+
+        const nameTd = document.createElement('td');
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'form-control';
+        nameInput.placeholder = 'field_name';
+        nameInput.required = true;
+        nameInput.name='fieldName';
+        nameTd.appendChild(nameInput);
+
+        const typeTd = document.createElement('td');
+        const typeSelect = document.createElement('select');
+        typeSelect.className = 'form-select';
+        typeSelect.name = 'fieldType';
+        ['text','textarea', 'number', 'select', 'multiselect'].forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            typeSelect.appendChild(option);
+        });
+        typeTd.appendChild(typeSelect);
+
+        const deleteTd = document.createElement('td');
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-sm btn-danger';
+        deleteBtn.textContent = 'Remove';
+        deleteBtn.onclick = () => row.remove();
+        deleteTd.appendChild(deleteBtn);
+
+        row.appendChild(nameTd);
+        row.appendChild(typeTd);
+        row.appendChild(deleteTd);
+
+        fieldsBody.appendChild(row);
+    });
+    let originalNameRow = null;
+
+    entityType.addEventListener('change', () => {
+        const selectedType = entityType.value;
+        const idRow = fieldsBody.querySelectorAll('tr')[0];
+        if (selectedType === 'person') {
+            // Save and remove the 'name' row
+            const rows = Array.from(fieldsBody.querySelectorAll('tr'));
+            const nameRowIndex = rows.findIndex(row => row.children[0]?.textContent?.trim() === 'name');
+            if (nameRowIndex !== -1) {
+                originalNameRow = rows[nameRowIndex];
+                fieldsBody.removeChild(originalNameRow);
+            }
+
+            // Add first_name and last_name rows
+            ['first_name', 'last_name'].forEach(field => {
+                const row = document.createElement('tr');
+                const nameCell = document.createElement('td');
+                nameCell.textContent = field;
+                const typeCell = document.createElement('td');
+                typeCell.textContent = 'text';
+                const emptyCell = document.createElement('td');
+                row.appendChild(nameCell);
+                row.appendChild(typeCell);
+                row.appendChild(emptyCell);
+                fieldsBody.insertBefore(row, idRow.nextSibling);
+            });
+        } else {
+            // Remove first_name and last_name rows if present
+            ['first_name', 'last_name'].forEach(field => {
+                const row = Array.from(fieldsBody.querySelectorAll('tr'))
+                    .find(r => r.children[0]?.textContent?.trim() === field);
+                if (row) fieldsBody.removeChild(row);
+            });
+
+            // Re-insert original 'name' row if it was removed
+            if (originalNameRow) {
+                // Insert it after the 'id' row (index 0)
+                fieldsBody.insertBefore(originalNameRow, idRow.nextSibling);
+                originalNameRow = null;
+            }
+        }
+    });
+
+    document.getElementById('entityCreateForm').addEventListener('submit', function (e) {
+        e.preventDefault(); // Stop normal form submission
+
+        // Get basic form values
+        const entityName = document.getElementById('entityName').value.trim();
+        const entityTableName = document.getElementById('entityTableName').value.trim();
+        const entityClassName = document.getElementById('entityClassName').value.trim();
+        const entityType = document.getElementById('entityType').value;
+
+        // Get dynamic fields from the table
+        const fields = [];
+        const fieldsRows = document.querySelectorAll('#fieldsBody tr');
+        fieldsRows.forEach(row => {
+            const nameInput = row.querySelector('input[name="fieldName"]');
+            const typeSelect = row.querySelector('select[name="fieldType"]');
+
+            const fieldName = nameInput?.value.trim();
+            const fieldType = typeSelect?.value;
+
+            if (fieldName && fieldType) {
+                fields.push({ name: fieldName, type: fieldType });
+            }
+        });
+        //todo: allow the definition of custom views when propably supported
+        const views = {
+            'record' : {},
+            'list' : { 'isdefault': true},
+            'subpanels' : {}
+        };
+
+        // Construct the payload
+        const submitBody = {
+            name: entityName,
+            tableName: entityTableName,
+            className: entityClassName,
+            type: entityType,
+            fields: fields,
+            views: views
+        };
+
+        // Call the handler
+        createEntity(submitBody);
+    });
+
+    async function createEntity(submitBody) {
+        const response = await apiFetch(`${server}/modulebuilder/newEntity`, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(submitBody)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.log(data);
+            alert(data.message || "Creation failed. Please try again.");
+        } else {
+            alert('Entity Created');
+            await loadMetadata();
+            applyMetadataToUi();
+        }
+    }
+
+}
+function loadRealtionshipCreator() {
+    const relateModules = getRelatableModules();
+    const mbContainer = document.getElementById("mb-content");
+
+    // Helper to capitalize first letter and helper to generate option HTML and
+    const capitalize = str => str.charAt(0).toUpperCase() + str.slice(1);
+    const buildRelateOptions = () => {
+        return relateModules
+            .map(module => `<option value="${module}">${capitalize(module)}</option>`)
+            .join('');
+    };
+
+
+
+    mbContainer.innerHTML = `
+<div class="module-selection w-100 d-flex p-2 gap-2">
+    <select id="lhEntity" class="form-control form-select" title="Select the Modules you want to relate">
+        <option value="" selected></option>
+        ${buildRelateOptions()}
+    </select>
+    <select id="rhEntity" class="form-control form-select">
+        <option value="" selected></option>
+        ${buildRelateOptions()}
+    </select>
+    <input type="button" class="btn btn-primary selectRelModules" id="selectRelModules" value="Select Modules">
+</div>
+<div class="w-100 h-100">
+        <div id="jsoneditor" class="h-75 bg-secondary-subtle"></div>
+        <div id="jsoneditorErrorContainer"></div>
+        <button class="btn btn-success mt-3 relEditorCreate" id="relEditorCreate">Create Relationship</button>
+</div>`;
+    document.getElementById('jsoneditor').innerHTML = '';
+    const editorContainer = document.getElementById('jsoneditor');
+    const initJson = {"rel_name": "", "rh_entity": "", "lh_entity": "", "rel_table": ""};
+    let currentRelName = initJson.rel_name;
+    const options = {
+        name: '',
+        mode: 'tree',
+        mainMenuBar: true,
+        navigationBar: false,
+        statusBar: false,
+        enableSort: false,
+        enableTransform: false,
+        history: true,                 // enable undo/redo
+        allowSchemaSuggestions: true,
+        modes: ['code', 'tree', 'view'], // allowed modes
+        search: false,
+        onChangeJSON: function (json) {
+            if (json.rel_name && json.rel_name !== currentRelName) {
+                currentRelName = json.rel_name;
+                window.jsonEditor.setName(json.rel_name);
+            }
+        }
+    };
+    window.jsonEditor = new JSONEditor(
+        editorContainer,
+        options,initJson);
+    document.getElementById('selectRelModules').addEventListener('click', () => {
+        const lhEntitySelect = document.getElementById('lhEntity').value;
+        const rhEntitySelect = document.getElementById('rhEntity').value;
+        let relationship = lhEntitySelect + '_' + rhEntitySelect;
+        const existingRel = APP_STATE.metaData.relationships[relationship]?? null;
+        let relTable = relationship;
+        if(rhEntitySelect === '' || lhEntitySelect === ''){
+            document.getElementById('jsoneditorErrorContainer').innerHTML = 'You must select 2 modules';
+            document.getElementById('jsoneditorErrorContainer').classList.add('alert', 'alert-warning');
+            return;
+        }else{
+            document.getElementById('jsoneditorErrorContainer').innerHTML = '';
+            document.getElementById('jsoneditorErrorContainer').classList.remove('alert', 'alert-warning');
+        }
+
+        //frontend check if entities are already linked. further validation on the backend when we save the relationship
+        if(existingRel){
+            let i = 1;
+            while(true){
+                let newExistingRel = APP_STATE.metaData.relationships[relationship+'_'+i]?? null;
+                if(newExistingRel){
+                    i++;
+                }else {
+                    relationship += '_'+i;
+                    relTable = relTable += '_'+i;
+                    break;
+                }
+            }
+        }
+        const relationshipMeta = {
+            "rel_name": relationship,
+            "rh_entity": rhEntitySelect,
+            "lh_entity": lhEntitySelect,
+            "rel_table": relTable
+        };
+        window.jsonEditor.setName(relationship);
+        window.jsonEditor.set(relationshipMeta);
+        document.querySelector('.relEditorCreate').disabled = false;
+    });
+    document.getElementById('relEditorCreate').addEventListener('click', () => {
+        const relDef = window.jsonEditor.get();
+        saveRelationship(relDef);
+    });
+
+}
+async function deleteEntityView(entity){
+    const mbContainer = document.getElementById("mb-content");
+    const className = entity.charAt(0).toUpperCase() + entity.slice(1).toLowerCase();
+    const numberOfRecords = await countTotalRecords(entity);
+    mbContainer.innerHTML = `
+        <div class="container mt-5">
+
+            <div class="row mt-4 h-100">
+                <div class="col-md-6">
+                    <div class="card" style="width: 18rem;">
+                        <div class="card-body">
+                            <h5 class="card-title">Deleting ${className}</h5>
+                            <p class="card-text">Currently, has <span class="badge bg-info">${numberOfRecords}</span> records. Make sure to back them up. The table will be deleted as well.</p>
+                        </div>
+                        <div class="card-footer">
+                            <input type="button" class="btn btn-sm btn-danger" id="deleteEntityButton" value="Delete Entity">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div><!-- steps list -->
+                    <pre id='entityDeleteSteps'></pre>
+                    </div>
+                </div>
+            </div>
+
+        </div>`;
+    const deleteEntityButton = document.getElementById('deleteEntityButton');
+    deleteEntityButton.addEventListener('click', async () => {
+        // Confirm before deleting
+        if (!confirm(`Are you sure you want to delete this ${entity}? This action cannot be undone.`)) {
+            return;
+        }
+        try {
+            const submitBody = { entity: entity };
+            const response = await apiFetch(`${server}/modulebuilder/deleteEntity`, {
+                method: 'POST',
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(submitBody)
+            });
+
+            const result = await response.json();
+            if (response.ok) {
+                alert(`${entity} deleted successfully!`);
+                window.location.reload();
+            } else {
+                throw new Error(result.message || 'Failed to delete entity');
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+            alert(`Error deleting ${entity}: ${error.message}`);
+        }
+    });
+}
+async function deleteRelationshipView(relationship){
+    const mbContainer = document.getElementById("mb-content");
+    mbContainer.innerHTML = `
+        <div class="container mt-5">
+
+            <div class="row mt-4 h-100">
+                <div class="col-md-6">
+                    <div class="card" style="width: 18rem;">
+                        <div class="card-body">
+                            <h5 class="card-title">Deleting ${relationship}</h5>
+                            <p class="card-text">Make sure to back up the database. The relations and the subpanel view will be deleted as well.</p>
+                        </div>
+                        <div class="card-footer">
+                            <input type="button" class="btn btn-sm btn-danger" id="deleteRelationshipButton" value="Delete Relationship">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div><!-- steps list -->
+                    <pre id='entityDeleteSteps'></pre>
+                    </div>
+                </div>
+            </div>
+
+        </div>`;
+    const deleteRelationshipButton = document.getElementById('deleteRelationshipButton');
+    deleteRelationshipButton.addEventListener('click', async () => {
+        // Confirm before deleting
+        if (!confirm(`Are you sure you want to delete ${relationship}? This action cannot be undone.`)) {
+            return;
+        }
+        try {
+            const submitBody = { relationship: relationship };
+            const response = await apiFetch(`${server}/modulebuilder/deleteRelationship`, {
+                method: 'POST',
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(submitBody)
+            });
+
+            const result = await response.json();
+            if (response.ok) {
+                alert(`${relationship} deleted successfully!`);
+                window.location.reload();
+            } else {
+                throw new Error(result.message || 'Failed to delete relationship');
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+            alert(`Error deleting ${relationship}: ${error.message}`);
+        }
+    });
+}
+
+async function saveView(entity, view) {
+    try {
+        const updatedView = window.jsonEditor.get();
+        const submitBody = {
+            view: view,
+            entity: entity,
+            viewDef: updatedView
+        };
+        const response = await apiFetch(`${server}/modulebuilder/updateView`, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(submitBody)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.log(data);
+            alert(data.message || "Creation failed. Please try again.");
+        } else {
+            alert('View Created');
+            await loadMetadata();
+            applyMetadataToUi();
+        }
+        console.log("Saved View:", updatedView);
+
+    } catch (err) {
+        alert("Invalid JSON: " + err.message);
+    }
+}
+async function saveRelationship(relDef) {
+    try {
+        const response = await apiFetch(`${server}/modulebuilder/newRelationship`, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(relDef)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.log(data);
+            alert(data.message || "Creation failed. Please try again.");
+        } else {
+            alert('Relationship saved');
+            await loadMetadata();
+            applyMetadataToUi();
+        }
+    } catch (err) {
+        alert("Invalid JSON: " + err.message);
+    }
+}
+async function saveFields(entity, fieldDefs){
+    try {
+        const submitBody = {
+            entity: entity,
+            fieldDefs: fieldDefs
+        };
+        const response = await apiFetch(`${server}/modulebuilder/updateFields`, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(submitBody)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.log(data);
+            alert(data.message || "Update failed. Please try again.");
+        } else {
+            alert('Fields Saved');
+            await loadMetadata();
+            applyMetadataToUi();
+        }
+
+    } catch (err) {
+        alert("Invalid JSON: " + err.message);
+    }
+}
+
+function getRelatableModules() {
+    const exclude = excludedEntities;
+    return Object.keys(APP_STATE.metaData.entities).filter(entity => !exclude.includes(entity));
+}
+function buildOptions(values){
+    const capitalize = str => str.charAt(0).toUpperCase() + str.slice(1);
+    return values
+        .map(value => `<option value="${value}">${capitalize(value)}</option>`)
+        .join('');
+}

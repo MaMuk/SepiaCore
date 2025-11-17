@@ -1,0 +1,311 @@
+export function {{ entityKey }}AttachEventListeners(viewManager = null) {
+    console.log('loaded for {{ entityKey }}');
+    const apiFetch = window.apiFetch;
+    const server = window.APP_STATE.server;
+
+    // Track selected record IDs
+    const selectedIds = new Set();
+    renderListView();
+
+    function renderListView() {
+        const {metaData} = window.APP_STATE;
+        const columns = metaData?.entities?.{{ entityKey }}?.module_views?.list?.layout || [];
+        const gridWrapper = document.getElementById("gridWrapper");
+
+        if (!gridWrapper) {
+            console.error("Missing #gridWrapper element in DOM.");
+            return;
+        }
+
+        // Extract column keys for data mapping (before transforming columns)
+        const columnKeys = columns.map(c => (typeof c === "string" ? c : c.id || c.name));
+        const token = window.localStorage.getItem("token") || "";
+
+        // Create selection column header with checkbox and dropdown using btn-group
+{#        const selectionHeader = gridjs.html(`
+            <div class="btn-group btn-group-sm" style="position: relative; z-index: 1000;">
+                <input type="checkbox" class="btn-check" id="selectAllCheckbox">
+                <label class="btn btn-outline-secondary" for="selectAllCheckbox"></label>
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" 
+                        id="selectionDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="visually-hidden">Select All</span>
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="selectionDropdownBtn">
+                    <li>
+                        <input type="button" class="dropdown-item" value="Delete" id="deleteSelectedBtn" 
+                               data-confirm="Are you sure to delete these records?">
+                    </li>
+                </ul>
+            </div>
+        `);#}
+        const selectionHeader = gridjs.html(`
+                    <div class="btn-group btn-group-sm">
+                        <!-- Fake button checkbox -->
+                        <input type="checkbox" class="btn-check list-select-all" id="checkButton">
+                        <label class="btn btn-outline-secondary" for="checkButton"></label>
+
+                        <!-- Dropdown button -->
+                        <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                            <span class="visually-hidden">Select All</span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><input type="button" class="dropdown-item" href="#" value="Delete" id="select-delete-button"
+                                       data-confirm="Are you sure to delete these record?"></li>
+                        </ul>
+                    </div>
+        `);
+
+        // Create selection column
+        const selectionColumn = {
+            id: 'selection',
+            name: selectionHeader,
+            width: '120px',
+            sort: false,
+            formatter: (cell) => {
+                const recordId = cell || '';
+                const checkboxId = `select-${recordId}`;
+                return gridjs.h('input', {
+                    type: 'checkbox',
+                    id: checkboxId,
+                    className: 'row-select-checkbox',
+                    'data-record-id': recordId,
+                    checked: selectedIds.has(recordId),
+                    onClick: (e) => checkboxClicked(e.target)
+                });
+            }
+        };
+{#        const selectionColumn = {
+            id: 'selection',
+            name: selectionHeader,
+            width: '120px',
+
+            formatter: (cell) => {
+                // The cell value is the record ID (we put it as the first element)
+                const recordId = cell || '';
+                const checkboxId = `select-${recordId}`;
+                // Just return the checkbox - the td will be made clickable via event handler
+                return gridjs.html(`
+                    <input type="checkbox" 
+                           id="${checkboxId}" 
+                           class="row-select-checkbox" 
+                           data-record-id="${recordId}"
+                           ${selectedIds.has(recordId) ? 'checked' : ''}>
+                `);
+            },
+            sort: false
+        };#}
+
+        // Ensure all columns have an id property
+        const columnsWithIds = columns.map((col, index) => {
+            if (typeof col === 'string') {
+                return {
+                    id: col,
+                    name: col
+
+                };
+            } else {
+                return {
+                    ...col,
+                    id: col.id || col.name || `col_${index}`
+                };
+            }
+        });
+
+        // Prepend selection column to columns array
+        const allColumns = [selectionColumn, ...columnsWithIds];
+
+        const grid = new gridjs.Grid({
+            columns: allColumns,
+
+            // server-side search
+            search: {
+                server: {
+                    url: (baseUrl, keyword) => {
+                        const url = new URL(baseUrl, window.location.origin);
+                        if (keyword) url.searchParams.set("search", keyword);
+                        return url.toString();
+                    }
+                }
+            },
+            // server-side sorting
+            sort: {
+                multiColumn: false,
+                server: {
+                    url: (baseUrl, columns) => {
+                        if (!columns.length) return baseUrl;
+
+                        const col = columns[0];
+                        const dir = col.direction === 1 ? "asc" : "desc";
+                        // Map column index to column key (adjust for selection column)
+                        const actualColIndex = col.index - 1; // Subtract 1 for selection column
+                        const colName = columnKeys[actualColIndex] || "date_modified";
+
+                        const url = new URL(baseUrl, window.location.origin);
+                        url.searchParams.set("sort", colName);
+                        url.searchParams.set("order", dir.toUpperCase());
+                        return url.toString();
+                    }
+                }
+            },
+
+            // server-side pagination
+            pagination: {
+                limit: 10,
+                server: {
+                    url: (baseUrl, page, limit) => {
+                        const url = new URL(baseUrl, window.location.origin);
+                        url.searchParams.set("page", page + 1);
+                        url.searchParams.set("limit", limit);
+                        return url.toString();
+                    }
+                }
+            },
+
+            // main server configuration
+            server: {
+                url: `${server}/backendviews/{{ entityKey }}/list`,
+                headers: {
+                    Authorization: token
+                },
+                then: (json) => {
+                    const records = json.records || [];
+                    // Return data with ID as first element (for selection column formatter)
+                    return records.map(record => [
+                        record.id, // ID in selection column (accessible via formatter)
+                        ...columnKeys.map(key => record[key] ?? "")
+                    ]);
+                },
+                total: (json) => json.total || 0
+            },
+        });
+
+        // Add CSS for selection column cursor
+        const style = document.createElement('style');
+        style.textContent = `
+            td[data-column-id="selection"] {
+                cursor: pointer;
+            }
+            .gridjs-th {
+                overflow: visible !important;
+            }
+
+            .gridjs-th .gridjs-th-content {
+                overflow: visible !important;
+                width: auto !important;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Function to update select all checkbox state
+        function updateSelectAllCheckbox() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            if (selectAllCheckbox) {
+                const checkboxes = gridWrapper.querySelectorAll('.row-select-checkbox');
+                if (checkboxes.length > 0) {
+                    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                    selectAllCheckbox.checked = allChecked;
+                }
+            }
+        }
+
+        // Use GridJS event system for cell clicks
+        grid.on('cellClick', (cell, row, column) => {
+            if(column.id === 'selection'){
+                if(cell.target){
+                    const checkbox = cell.target.querySelector('.row-select-checkbox')
+                    if (checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkboxClicked(checkbox)
+                    }
+                }
+                console.log(selectedIds);
+            }else{
+                const checkbox = cell.target.parentElement.firstChild.firstChild;
+                if(checkbox){
+                    const recordId = checkbox.getAttribute('data-record-id');
+                    renderDetail('{{ entityKey }}', `${server}/{{ entityKey }}/${recordId}`);
+                }
+            }
+        });
+
+        function checkboxClicked(checkbox){
+            const recordId = checkbox.getAttribute('data-record-id');
+            // Update selectedIds
+            if (checkbox.checked) {
+                selectedIds.add(recordId);
+            } else {
+                selectedIds.delete(recordId);
+            }
+            updateSelectAllCheckbox();
+        }
+
+
+        grid.on('ready', () => {
+            // Initialize Bootstrap dropdown
+            const dropdownBtn = document.getElementById('selectionDropdownBtn');
+            if (dropdownBtn && !dropdownBtn._dropdown && window.bootstrap?.Dropdown) {
+                try {
+                    new bootstrap.Dropdown(dropdownBtn);
+                    dropdownBtn.addEventListener('shown.bs.dropdown', () => {
+                        const menu = dropdownBtn.nextElementSibling;
+                        if (menu?.classList.contains('dropdown-menu')) {
+                            menu.style.zIndex = '9999';
+                        }
+                        const popperElement = document.querySelector('.dropdown-menu.show');
+                        if (popperElement) {
+                            popperElement.style.zIndex = '9999';
+                        }
+                    });
+                } catch (e) {
+                    console.warn('Bootstrap dropdown initialization failed:', e);
+                }
+            }
+
+            // Select all checkbox
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.addEventListener('change', (e) => {
+                    const isChecked = e.target.checked;
+                    const checkboxes = gridWrapper.querySelectorAll('.row-select-checkbox');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = isChecked;
+                        const recordId = checkbox.getAttribute('data-record-id');
+                        if (isChecked) {
+                            selectedIds.add(recordId);
+                        } else {
+                            selectedIds.delete(recordId);
+                        }
+                    });
+                });
+            }
+
+            // Search input handler
+            const searchInput = gridWrapper.querySelector(".gridjs-search input");
+            if (searchInput) {
+                searchInput.addEventListener("input", () => {
+                    const isSearching = searchInput.value !== "";
+                    const summaryEl = gridWrapper.querySelector(".gridjs-summary");
+                    const pagesEl = gridWrapper.querySelector(".gridjs-pages");
+                    if (summaryEl) summaryEl.style.display = isSearching ? "none" : "block";
+                    if (pagesEl) pagesEl.style.display = isSearching ? "none" : "block";
+                });
+            }
+
+            updateSelectAllCheckbox();
+        });
+
+        grid.render(gridWrapper);
+
+
+    }
+    function renderDetail(model, url) {
+        viewManager.api.fetchJson(url)
+            .then(data => {
+                window.windowManager.open(model, data);
+            })
+            .catch(error => {
+                console.error('Error loading detail:', error);
+            });
+    }
+
+}

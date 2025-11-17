@@ -1,0 +1,86 @@
+{% import "components/fields-detail.html.twig" as detailField %}
+<div class="h-100 d-flex flex-column">
+    <div class="card w-100 rounded-0 d-flex flex-column flex-grow-1">
+        <div class="card-header d-flex justify-content-between">
+            <a href="#" class="btn btn-sm btn-primary record-edit">Edit</a>
+
+{#            <div class="btn-group btn-group-sm" role="group" aria-label="Record Navigation">
+                <button type="button" class="btn btn-sm btn-outline-primary record-navigation {% if not prevId %}disabled{% endif %}"
+                        data-id="{{ prevId }}">
+                    <i class="fa fa-angle-double-left" aria-hidden="true"></i>
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-primary">
+                    <i class="fa fa-angle-double-up" aria-hidden="true"></i>
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-primary record-navigation {% if not nextId %}disabled{% endif %}"
+                        data-id="{{ nextId }}">
+                    <i class="fa fa-angle-double-right" aria-hidden="true"></i>
+                </button>
+            </div>#}
+            <a href="#" class="btn btn-sm btn-danger record-delete"
+               data-confirm="Are you sure to delete this record?"
+               data-record-id="{{ record.id }}">Delete</a>
+
+        </div>
+        <div class="card-body flex-grow-1" style="min-height: 60px;">
+            {% for row in layout_detail_view %}
+                <div class="row mb-3">
+                    {% for field in row %}
+                        <div class="col">
+                            {#<strong>{{ field|capitalize|replace({'_': ' '}) }}:</strong> {{ record[field] is defined ? record[field] : 'N/A' }}#}
+                            <strong>{{ detailField.label(field) }}</strong> {{ detailField.render(field, field_definitions, record[field] | default(''), relationship, settings) }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+        <div class="card-footer d-flex justify-content-between">
+
+            <a href="#" class="btn btn-sm btn-primary record-edit">Edit</a>
+            <a href="#" class="btn btn-sm btn-danger record-delete"
+               data-confirm="Are you sure to delete this record?"
+               data-record-id="{{ record.id }}">Delete</a>
+
+        </div>
+    </div>
+    {% if subpanel_view is not empty %}
+        <div class="mt-2 p-0 w-100 d-flex flex-column flex-grow-1">
+            {% for view in subpanel_view %}
+                <div class="card rounded-0 w-100 d-flex flex-column flex-grow-1">
+                    <div class="card-header d-flex justify-content-between">
+                        {{ view.entity }}
+
+                        <a href="#" class="btn btn-sm btn-outline-secondary expand-subpanel"
+                           data-id="{{ record.id }}"
+                           data-relationship-entity="{{ view.entity }}"
+                           data-relationship-type="{{ view.rel_type }}"
+                           {% if view.rel_type == 'one_to_many'%}
+                           data-relationship-field-name="{{ view.rel_field}}"
+                           {% elseif view.rel_type == 'many_to_many' %}
+                           data-relationship-field-name="{{ view.rel_name }}"
+                           {% endif %}
+                        ><i class="fa fa-angle-double-down" aria-hidden="true"></i> Load Records</a>
+                        <a class="btn btn-sm btn-outline-secondary collapse-subpanel d-none" data-relationship-entity="{{ view.entity }}">
+                            <i class="fa fa-angle-double-up" aria-hidden="true"></i> Collapse</a>
+
+                        <a href="#" class="btn btn-sm btn-success add-relationship"
+                           data-relationship-type="{{ view.rel_type }}"
+                           data-relationship-entity="{{ view.entity }}"
+                        {% if view.rel_type == 'one_to_many'%}
+                            data-relationship-field-name="{{ view.rel_field}}"
+                        {% elseif view.rel_type == 'many_to_many' %}
+                            data-relationship-field-name="{{ view.rel_name }}"
+                        {% endif %}
+                           ><i class="fa fa-plus" aria-hidden="true"></i></a>
+                    </div>
+                    <div class="card-body d-none flex-grow-1 px-0 {{ view.entity }}-subpanel-body">
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+</div>
+

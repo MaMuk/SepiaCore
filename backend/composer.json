@@ -1,0 +1,29 @@
+{
+    "name": "enkidu/backend",
+    "type": "project",
+    "authors": [
+        {
+            "name": "Martin Melmuk",
+            "email": "martin.melmuk@outlook.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "SepiaCoreUtilities\\": "src/SepiaCoreUtilities/"
+        }
+    },
+    "require": {
+        "flightphp/core": "^3.15",
+        "illuminate/database": "^12.15",
+        "nesbot/carbon": "3.8.6",
+        "ramsey/uuid": "4.7.6",
+        "laravel/helpers": "^1.7",
+        "gabordemooij/redbean": "5.7.4",
+        "twig/twig": "3.20.0",
+        "illuminate/events": "^12.15",
+        "illuminate/support": "^12.15",
+        "monolog/monolog": "^3.9",
+        "ext-luasandbox": "*",
+        "ext-pdo": "*"
+    }
+}

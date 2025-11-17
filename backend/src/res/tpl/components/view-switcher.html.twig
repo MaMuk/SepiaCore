@@ -1,0 +1,17 @@
+<div class="p-2 d-flex justify-content-end">
+{#    <input type="search" placeholder="Search list..." id="{{ entity }}ListViewFilterSearch" class="form-control form-control-sm w-25">
+    <button data-entity="{{ entity }}" class="btn btn-primary btn-sm list-create-button">Create</button>#}
+    <div class="btn-group">
+        <a href="#" data-view="list"
+           data-entity="{{ entity }}"
+           class="btn btn-outline-secondary btn-sm view-switcher-button">
+            <i class="fa fa-list" aria-hidden="true"></i></a>
+        <a href="#" data-view="kanban"
+           data-entity="{{ entity }}"
+           class="btn btn-outline-secondary btn-sm view-switcher-button">
+            <i class="fa fa-trello" aria-hidden="true"></i></a>
+        {% if isAdmin %}
+        <a href="#" data-view="debug" data-entity="{{ entity }}" class="btn btn-outline-secondary btn-sm view-switcher-button"><i class="fa fa-trello" aria-hidden="true"></i></a>
+        {% endif %}
+    </div>
+</div>

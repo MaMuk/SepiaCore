@@ -1,0 +1,52 @@
+{% import "components/fields-detail.html.twig" as detailField %}
+{% include "components/list-filters.html.twig" %}
+{#{% set fields_list_view = metadata['entities'][entity]['fields_list_view'] %}#}
+{% set fields_list_view = metadata['entities'][entity]['module_views']['list']['layout'] %}
+<table class="table table-sm table-hover" id="dynamicTable">
+    <thead>
+    <tr>
+        {% if records|length > 0 %}
+
+            {% for key in records[0]|keys %}
+                {% if key in fields_list_view %}
+                    <th scope="col">
+                        {% if pagination.sortBy == key %}
+                            {% if pagination.sortOrder == 'DESC' %}
+                                <i class="fa fa-sort-desc" aria-hidden="true"></i>{% else%}<i class="fa fa-sort-asc" aria-hidden="true"></i>
+                            {% endif%}
+                        {% else %}
+                            <i class="fa fa-sort" aria-hidden="true"></i>
+                        {% endif %}
+                        <a class="sort-table"
+                           href="#"
+                           data-order="{{ pagination.sortOrder }}"
+                           data-sort="{{ key }}">
+                            {{ key|replace({'_': ' '})|title }}</a>
+                    </th>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </tr>
+    </thead>
+    <tbody>
+    {% for record in records %}
+        <tr class="table-row-clickable" data-href="/{{ record.id }}">
+            {% for key, value in record %}
+                {% if key in fields_list_view %}
+                    {#                    <td>{{ value }}</td>#}
+                    <td>{{ detailField.render(key, field_definitions, value | default(''), relationship, settings) }}</td>
+                {% endif %}
+            {% endfor %}
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% include "components/pagination.twig" %}
+<style>
+    .table-row-clickable {
+        cursor: pointer;
+    }
+    .table-row-clickable:hover {
+        background-color: #f5f5f5;
+    }
+</style>

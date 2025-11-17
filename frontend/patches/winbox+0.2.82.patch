@@ -1,0 +1,13 @@
+nodiff --git a/node_modules/winbox/src/js/winbox.js b/node_modules/winbox/src/js/winbox.js
+index bd13113..9295e0c 100644
+--- a/node_modules/winbox/src/js/winbox.js
++++ b/node_modules/winbox/src/js/winbox.js
+@@ -528,7 +528,7 @@ function update_min_stack(){
+ 
+         self = stack_min[i]
+         key = self.left + ":" + self.top;
+-        width = Math.min((root_w - self.left - self.right) / splitscreen_length[key], 250);
++        width = 250; // fixed width
+         self.resize((width + 1) | 0, self.header, true)
+             .move((self.left + splitscreen_index[key] * width) | 0, root_h - self.bottom - self.header, true);
+         splitscreen_index[key]++;

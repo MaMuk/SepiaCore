@@ -1,0 +1,52 @@
+{% macro render(name, field_definitions, value, relationship, settings) %}
+    {% if name is empty %}
+        {# Spacer field: just a column placeholder #}
+        <div class="col"></div>
+    {% else %}
+        {% set type = field_definitions[name]['type'] %}
+        {% set options = field_definitions[name]['options'] %}
+            {% if type == 'select' %}
+                {% if options %}
+                        {% for key, display_value in options %}
+                            {% if key == value %} {{ display_value }} {% endif %}
+                        {% endfor %}
+                {% else %}
+                    No Options
+                {% endif %}
+            {% elseif type == 'relationship' %}
+                {% if relationship[name]['name'] %}
+                    {% if relationship[name]['entity'] != 'users' %} {#User has no Views for now#}
+                    <a href="/{{ relationship[name]['entity'] }}/{{ relationship[name]['id'] }}">
+                        {{ relationship[name]['name'] }}</a>
+                    {% else %}
+                        {{ relationship[name]['name'] }}
+                    {% endif %}
+                {% endif %}
+            {% elseif type == 'datetime' %}
+                {% set date_value = value is not empty ? value|date(settings.datetime_format|default('Y-m-d H:i:s')) : '' %}
+                {{ date_value }}
+            {% elseif type == 'collection' %}
+                <div id="{{ name }}-display" class="collection-display">
+                    {% if value is iterable %}
+                        {% for item in value %}
+                            <span class="collection-item-detail">{{ item }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">No items</span>
+                    {% endif %}
+                </div>
+            {% else %}
+                {{ value }}
+            {% endif %}
+        <style>
+            .collection-item{
+            {# span with light grey background and rounded borders #}
+            }
+        </style>
+    {% endif %}
+{% endmacro %}
+{% macro label(name) %}
+    {% if name is not empty %}
+        <strong>{{ name|capitalize|replace({'_': ' '}) }}:</strong>
+    {% endif %}
+{% endmacro %}

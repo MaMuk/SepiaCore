@@ -1,0 +1,32 @@
+{% import "components/fields-edit.html.twig" as formField %}
+{% set formId = formId ?? random() %}
+<form class="h-100">
+<div class="h-100 d-flex">
+    <div class="card w-100 rounded-0">
+        <div class="card-header d-flex justify-content-between">
+
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+
+            <button type="button" class="btn btn-sm btn-secondary record-cancel">Cancel</button>
+        </div>
+        <div class="card-body">
+            <input type="hidden" name="id" id="id" value="{{ record['id'] }}">
+            {% for row in layout_detail_view %}
+                <div class="row mb-3">
+                    {% for field in row %}
+                        <div class="col">
+                            {{ formField.render(field, field_definitions, record[field]|default(''), relationship, formId) }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+        <div class="card-footer d-flex justify-content-between">
+
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+
+            <button type="button" class="btn btn-sm btn-secondary record-cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+</form>

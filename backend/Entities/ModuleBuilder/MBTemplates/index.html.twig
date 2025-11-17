@@ -1,0 +1,154 @@
+<div class="container m-0 h-100 mw-100">
+    <div class="row h-100">
+        <div class="col mb-sidebar col-3 overflow-x-scroll">
+            <div class="mb-tree-view">
+                <ul>
+                    <li class="disclosure-open" onclick="toggleTreeView(event)">
+                        <strong>Entities</strong>
+                        <ul>
+                            {%for entity_name,entity in metadata.entities %}
+                            {% if entity_name not in ['tokens', 'users', 'modulebuilder','rawendpointdata'] %} {#system modules should not be modifiable #}
+                                <li class="disclosure-closed" onclick="toggleTreeView(event)" data-mb-entity="{{ entity_name }}">
+                                    <div class="tree-item-header">
+                                        <span>{{ entity_name }}</span>
+                                        <a href="#" class="tree-delete-link" data-mb-action="deleteEntity" title="Delete Entity"><i class="fa fa-trash" aria-hidden="true"></i></a>
+                                    </div>
+                                    <ul class="collapse">
+                                        <li class="square" onclick="toggleTreeView(event)">
+                                            <a href="#" data-mb-action="fields">Fields</a>
+                                        </li>
+                                        <li class="disclosure-open">Layouts
+                                            <ul class="">
+                                                <li class="square">
+                                                    <a href="#" data-mb-action="record">Record</a>
+                                                </li>
+                                                <li class="square">
+                                                    <a href="#" data-mb-action="list">List</a>
+                                                </li>
+                                                <li class="square">
+                                                    <a href="#" data-mb-action="subpanels">Subpanels</a>
+                                                </li>
+                                            </ul>
+                                        </li>
+                                        <li class="square" onclick="toggleTreeView(event)">
+                                            <a href="#" data-mb-action="hooks">Event Hooks</a>
+                                        </li>
+                                    </ul>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            <li style="list-style-type: none">
+                                <br>
+                                <a href="#" class="btn btn-success btn-sm" data-mb-action="newModule">+ New Module</a>
+                            </li>
+                        </ul>
+
+
+
+                    </li>
+
+                </ul>
+                <ul>
+                    <li class="disclosure-closed" onclick="toggleTreeView(event)">
+                        <strong>Relationships</strong>
+                        <ul class="">
+                            <li class="disclosure-closed" onclick="toggleTreeView(event)">
+                                n:m
+                                {%for relationship_name, relationships in metadata.relationships %}
+                                <ul class="">
+                                    <li class="square" onclick="toggleTreeView(event)"data-mb-entity="{{ relationship_name }}">
+                                        <div class="tree-item-header">
+                                            <a href="#" data-mb-action="editRelationship">{{ relationship_name }}</a>
+                                            <a href="#" class="tree-delete-link" data-mb-action="deleteRelationship" title="Delete Relationship"><i class="fa fa-trash" aria-hidden="true"></i></a>
+                                        </div>
+                                    </li>
+                                </ul>
+                                {% endfor %}
+                            </li>
+                            <li style="list-style-type: none">
+                                <br>
+                                <a href="#" class="btn btn-success btn-sm" data-mb-action="newRelationship">+ New Relationship</a>
+
+                            </li>
+                        </ul>
+                        <br>
+                    </li>
+                </ul>
+                <a href="#" class="btn btn-success btn-sm" data-mb-action="editNavigationEntities">Edit Navigation</a>
+            </div>
+        </div>
+        <div class="col col-9" id="mb-content">
+
+        </div>
+    </div>
+</div>
+<style>
+    /* Additional styling for the tree view */
+    .mb-tree-view ul {
+        list-style-type: none;
+        padding-left: 20px;
+    }
+    .mb-tree-view li {
+        cursor: pointer;
+    }
+    /* Style for nodes that are collapsible with disclosure markers */
+    .disclosure-closed {
+        list-style-type: disclosure-closed; /* Represents a closed node */
+    }
+
+    .disclosure-open {
+        list-style-type: disclosure-open; /* Represents an open node */
+    }
+
+    /* Style for non-collapsible items with a square */
+    .square {
+        list-style-type: square; /* Represents a square for non-collapsible nodes */
+    }
+
+    .tree-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+
+        border-bottom: 1px solid #ccc; /* faint bottom border */
+        padding: 5px 10px;
+        transition: background-color 0.2s ease;
+    }
+
+    .tree-item-header:hover {
+        background-color: #f5f5f5; /* light grey background on hover */
+    }
+
+
+    .tree-delete-link {
+        text-decoration: none;
+        color: red; /* or any style you want */
+        padding-left: 10px;
+        cursor: pointer;
+    }
+
+    .mb-sidebar{
+        --bs-bg-opacity:1;
+        background-color:rgba(var(--bs-tertiary-bg-rgb),var(--bs-bg-opacity))!important;
+        border-right: #d7d7d7 solid 1px;
+    }
+    .entity-list {
+        min-height: 200px;
+        border: 1px solid #ccc;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        background: #f8f9fa;
+    }
+    .entity-item {
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        background-color: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        cursor: grab;
+    }
+    .entity-list.drag-over {
+        background-color: #e2e6ea;
+    }
+</style>

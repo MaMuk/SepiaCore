@@ -1,0 +1,40 @@
+{% import "components/fields-detail.html.twig" as detailField %}
+<div class="subpanel-table-container">
+    <table class="table table-sm table-hover" id="dynamicTable">
+        <thead>
+        <tr>
+            {% if records|length > 0 %}
+                {% for key in records[0]|keys %}
+                    {% if key in subpanel_fields %}
+                        <th scope="col">
+                                {{ key|replace({'_': ' '})|title }}
+                        </th>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </tr>
+        </thead>
+        <tbody>
+        {% if records|length < 1 %}
+            No Records
+        {% endif %}
+        {% for record in records %}
+            <tr class="table-row-clickable" data-href="{{ record.id }}">
+                {% for key, value in record %}
+                    {% if key in subpanel_fields %}
+                        <td>{{ detailField.render(key, field_definitions, value | default(''), relationship[record.id], settings) }}</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <style>
+        .table-row-clickable {
+            cursor: pointer;
+        }
+        .table-row-clickable:hover {
+            background-color: #f5f5f5;
+        }
+    </style>
+</div>
