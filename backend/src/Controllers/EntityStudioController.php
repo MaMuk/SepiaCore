@@ -105,7 +105,11 @@ class EntityStudioController extends BaseController
                     break;
 
                 case 'deleteEntity':
-                    $this->deleteEntity($requestData['entity']);
+                    $result = $this->deleteEntity($requestData['entity']);
+                    if (!empty($result['errors'])) {
+                        $this->jsonResponse($result, 500);
+                        return;
+                    }
                     break;
 
                 case 'deleteRelationship':
@@ -128,7 +132,14 @@ class EntityStudioController extends BaseController
                     throw new Exception('Unknown action: ' . $action);
             }
 
-            $this->jsonHalt(['message' => $action . ' was successful']);
+            $response = [
+                'message' => $action . ' was successful',
+                'metadata' => $GLOBALS['metadata'] ?? null,
+            ];
+            if (isset($result)) {
+                $response = array_merge($response, $result);
+            }
+            $this->jsonHalt($response);
         } catch (Exception $e) {
             $this->jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
@@ -208,41 +219,62 @@ class EntityStudioController extends BaseController
      * @param string $entityName Entity name
      * @return bool
      */
-    public function deleteEntity(string $entityName): bool
+    public function deleteEntity(string $entityName): array
     {
-        $protectedEntities = ['Users', 'Tokens', 'ModuleBuilder', 'Dashboards'];
-        $className = ucfirst(strtolower($entityName));
+        $entityKey = strtolower($entityName);
+        $protectedEntities = ['users', 'tokens', 'modulebuilder', 'dashboards'];
+        $className = ucfirst($entityKey);
 
-        if (in_array($className, $protectedEntities)) {
+        if (in_array($entityKey, $protectedEntities, true)) {
             throw new \Exception("Deletion of $className entity is not allowed.");
         }
 
-        $table = $this->getTableNameForEntity($entityName);
+        $result = [
+            'success' => false,
+            'steps' => [],
+            'errors' => [],
+        ];
+
+        $table = $this->getTableNameForEntity($entityKey);
+
+        $recordStep = function (string $step, bool $success, ?string $error = null) use (&$result): void {
+            $result['steps'][$step] = $success;
+            if (!$success && $error) {
+                $result['errors'][$step] = $error;
+            }
+        };
 
         try {
             if (!Capsule::schema()->hasTable($table)) {
-                throw new \RuntimeException("Table '$table' does not exist.");
+                $recordStep('drop_table', false, "Table '$table' does not exist.");
+            } else {
+                Capsule::schema()->drop($table);
+                $recordStep('drop_table', !Capsule::schema()->hasTable($table), "Failed to drop table '$table'.");
             }
 
-            Capsule::connection()->beginTransaction();
-
             // Drop the entity's own table
-            Capsule::schema()->drop($table);
-
             // Delete entity directory and files
             $entityDir = ROOT_DIR . '/Entities/' . $className;
-            if (is_dir($entityDir)) {
-                $this->deleteDirectory($entityDir);
+            if (!is_dir($entityDir)) {
+                $recordStep('delete_entity_dir', true);
+            } else {
+                try {
+                    $this->deleteDirectory($entityDir);
+                    $recordStep('delete_entity_dir', !is_dir($entityDir), "Failed to delete entity directory '$entityDir'.");
+                } catch (\Throwable $e) {
+                    $recordStep('delete_entity_dir', false, $e->getMessage());
+                }
             }
 
             // Remove from navigation_entities
-            if (in_array($entityName, $GLOBALS['metadata']['navigation_entities'])) {
+            if (in_array($entityKey, $GLOBALS['metadata']['navigation_entities'], true)) {
                 $strippedNavigation = array_filter(
                     $GLOBALS['metadata']['navigation_entities'],
-                    fn($e) => mb_strtolower($e) !== $entityName
+                    fn($e) => mb_strtolower($e) !== $entityKey
                 );
                 $GLOBALS['metadata']['navigation_entities'] = array_values($strippedNavigation);
             }
+            $recordStep('navigation_entities', !in_array($entityKey, $GLOBALS['metadata']['navigation_entities'], true), "Failed to remove '$entityKey' from navigation_entities.");
 
             // Clean other entities' references
             foreach ($GLOBALS['metadata']['entities'] as $otherEntityKey => &$otherEntity) {
@@ -257,7 +289,7 @@ class EntityStudioController extends BaseController
                         if (
                             isset($fieldDef['type'], $fieldDef['entity']) &&
                             $fieldDef['type'] === 'relationship' &&
-                            strtolower($fieldDef['entity']) === $entityName
+                            strtolower($fieldDef['entity']) === $entityKey
                         ) {
                             $tableToAlter ??= $this->getTableNameForEntity($otherEntityKey);
                             if (
@@ -275,35 +307,42 @@ class EntityStudioController extends BaseController
 
                 // Drop collected columns
                 if ($tableToAlter && !empty($columnsToDrop)) {
-                    Capsule::schema()->table($tableToAlter, function ($table) use ($columnsToDrop) {
-                        foreach ($columnsToDrop as $column) {
-                            $table->dropColumn($column);
-                        }
-                    });
+                    try {
+                        Capsule::schema()->table($tableToAlter, function ($table) use ($columnsToDrop) {
+                            foreach ($columnsToDrop as $column) {
+                                $table->dropColumn($column);
+                            }
+                        });
+                    } catch (\Throwable $e) {
+                        $recordStep("drop_columns:$otherEntityKey", false, $e->getMessage());
+                    }
                 }
 
                 // Remove subpanels referencing deleted entity
                 if (isset($otherEntity['module_views']['subpanels'])) {
                     foreach ($otherEntity['module_views']['subpanels'] as $subpanelKey => $subpanelDef) {
-                        if (
-                            isset($subpanelDef['entity']) &&
-                            strtolower($subpanelDef['entity']) === $entityName
-                        ) {
-                            unset($otherEntity['module_views']['subpanels'][$subpanelKey]);
-                            $changed = true;
-                        }
+                    if (
+                        isset($subpanelDef['entity']) &&
+                        strtolower($subpanelDef['entity']) === $entityKey
+                    ) {
+                        unset($otherEntity['module_views']['subpanels'][$subpanelKey]);
+                        $changed = true;
+                    }
                     }
                 }
 
                 // Write updated defs if changes occurred
                 if ($changed) {
-                    $this->writeFieldDefs(
-                        $otherClassName,
-                        ['fields' => $otherEntity['fields'] ?? []]
-                    );
-
-                    if (isset($otherEntity['module_views'])) {
-                        $this->createViews($otherClassName, $otherEntity['module_views']);
+                    try {
+                        $this->writeFieldDefs(
+                            $otherClassName,
+                            ['fields' => $otherEntity['fields'] ?? []]
+                        );
+                        if (isset($otherEntity['module_views'])) {
+                            $this->createViews($otherClassName, $otherEntity['module_views']);
+                        }
+                    } catch (\Throwable $e) {
+                        $recordStep("update_other_entity:$otherEntityKey", false, $e->getMessage());
                     }
                 }
             }
@@ -311,27 +350,37 @@ class EntityStudioController extends BaseController
             // Remove relationship metadata and drop related relationship tables
             foreach ($GLOBALS['metadata']['relationships'] as $relKey => $relDef) {
                 if (
-                    strtolower($relDef['lh_entity']) === $entityName ||
-                    strtolower($relDef['rh_entity']) === $entityName
+                    strtolower($relDef['lh_entity']) === $entityKey ||
+                    strtolower($relDef['rh_entity']) === $entityKey
                 ) {
                     $relTable = $relDef['rel_table'] ?? null;
                     if ($relTable && Capsule::schema()->hasTable($relTable)) {
-                        Capsule::schema()->drop($relTable);
+                        try {
+                            Capsule::schema()->drop($relTable);
+                            $recordStep("drop_relationship_table:$relTable", !Capsule::schema()->hasTable($relTable), "Failed to drop relationship table '$relTable'.");
+                        } catch (\Throwable $e) {
+                            $recordStep("drop_relationship_table:$relTable", false, $e->getMessage());
+                        }
                     }
                     unset($GLOBALS['metadata']['relationships'][$relKey]);
                 }
             }
 
             // Finally, remove the entity itself from metadata
-            unset($GLOBALS['metadata']['entities'][$entityName]);
+            unset($GLOBALS['metadata']['entities'][$entityKey]);
 
-            $this->updateMetaDataFile('EntireFile');
-            Capsule::connection()->commit();
-            return true;
+            if (!$this->updateMetaDataFile('EntireFile')) {
+                $recordStep('update_metadata_file', false, 'Failed to write metadata file.');
+            } else {
+                $recordStep('update_metadata_file', true);
+            }
+
+            $result['success'] = empty($result['errors']);
+            return $result;
 
         } catch (\Exception $e) {
-            Capsule::connection()->rollBack();
-            return false;
+            $recordStep('delete_entity', false, $e->getMessage());
+            return $result;
         }
     }
 
@@ -444,8 +493,11 @@ class EntityStudioController extends BaseController
             }
         }
 
+        // Ensure database columns exist for all defined fields.
+        $this->ensureColumnsExist($entityClass, $fieldsArray);
+
         // 3. Final metadata file write
-        if (!$this->updateMetaDataFile('EntireFile')) {
+        if (!$this->updateMetaDataFile('UpdateFromEntities')) {
             throw new \Exception("Unable to update metadata file.");
         }
 
@@ -542,6 +594,30 @@ class EntityStudioController extends BaseController
 
         if ($writeMetaData) {
             $this->updateMetaDataFile('EntireFile');
+        }
+    }
+
+    /**
+     * Ensures table columns exist for the provided field definitions.
+     * @param BaseEntity $entityClass Entity class instance
+     * @param array $fieldsArray Fields array
+     * @return void
+     */
+    private function ensureColumnsExist(BaseEntity $entityClass, array $fieldsArray): void
+    {
+        $tableName = $entityClass->getTableName();
+
+        if (!Capsule::schema()->hasTable($tableName)) {
+            throw new \Exception("Table '$tableName' does not exist.");
+        }
+
+        foreach ($fieldsArray as $fieldName => $fieldDef) {
+            if (!Capsule::schema()->hasColumn($tableName, $fieldName)) {
+                $type = $fieldDef['type'] ?? 'text';
+                Capsule::schema()->table($tableName, function (Blueprint $table) use ($fieldName, $type) {
+                    $this->applyColumnDefinition($table, $fieldName, $type);
+                });
+            }
         }
     }
 
@@ -1222,4 +1298,3 @@ PHP;
         return ['name', 'date_created', 'date_modified'];
     }
 }
-

@@ -42,7 +42,9 @@ export const useMetadataStore = defineStore('metadata', () => {
     loading.value = true
     error.value = null
     try {
-      const response = await api.get('/metadata')
+      const response = await api.get('/metadata', {
+        params: { _ts: Date.now() }
+      })
       metadata.value = response.data
       return response.data
     } catch (err) {
@@ -51,6 +53,10 @@ export const useMetadataStore = defineStore('metadata', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  function setMetadata(nextMetadata) {
+    metadata.value = nextMetadata
   }
 
   function getEntityMetadata(entityName) {
@@ -72,9 +78,9 @@ export const useMetadataStore = defineStore('metadata', () => {
     loading,
     error,
     fetchMetadata,
+    setMetadata,
     getEntityMetadata,
     getEntityListLayout,
     formatEntityName
   }
 })
-

@@ -779,8 +779,12 @@ async function saveFields() {
     if (response.data) {
       toastStore.success('Fields saved successfully!')
       
-      // Refresh metadata
-      await metadataStore.fetchMetadata()
+      // Refresh metadata from server response when available
+      if (response.data.metadata) {
+        metadataStore.setMetadata(response.data.metadata)
+      } else {
+        await metadataStore.fetchMetadata()
+      }
       
       // Update original fields to mark no changes
       originalFields.value = { ...fieldDefs }
@@ -832,6 +836,17 @@ watch(() => fields.value, () => {
   hasChanges.value = JSON.stringify(currentFieldDefs) !== JSON.stringify(originalFields.value)
 }, { deep: true })
 
+watch(
+  () => metadataStore.metadata,
+  () => {
+    if (hasChanges.value || editingField.value) {
+      return
+    }
+
+    loadFields()
+  }
+)
+
 onMounted(() => {
   loadFields()
 })
@@ -857,4 +872,3 @@ onMounted(() => {
   font-weight: 600;
 }
 </style>
-

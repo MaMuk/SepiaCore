@@ -135,23 +135,16 @@
       </select>
 
       <!-- Relationship -->
-      <select
+      <RelationshipSearchSelect
         v-else-if="fieldDef?.type === 'relationship'"
-        :id="`${formId}-${fieldName}`"
-        :name="fieldName"
-        class="form-select"
-        :readonly="fieldDef?.readonly"
-        :value="value || ''"
-        @change="$emit('update:value', $event.target.value)"
-      >
-        <option value=""></option>
-        <option
-          v-if="relationship?.id"
-          :value="relationship.id"
-        >
-          {{ relationship.name }}
-        </option>
-      </select>
+        :input-id="`${formId}-${fieldName}`"
+        :input-name="fieldName"
+        :related-entity="fieldDef?.entity"
+        :model-value="value || ''"
+        :initial-record="relationship"
+        :disabled="fieldDef?.readonly"
+        @update:modelValue="$emit('update:value', $event)"
+      />
 
       <!-- Collection -->
       <div v-else-if="fieldDef?.type === 'collection'" class="collection-wrapper">
@@ -203,6 +196,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import RelationshipSearchSelect from './RelationshipSearchSelect.vue'
 
 const props = defineProps({
   fieldName: {
@@ -331,4 +325,3 @@ function handleRelationshipClick() {
   width: 100%;
 }
 </style>
-

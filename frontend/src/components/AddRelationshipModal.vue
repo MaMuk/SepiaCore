@@ -50,53 +50,18 @@
           <!-- Link Existing Tab -->
           <div v-if="activeTab === 'link'" class="tab-content">
             <div class="mb-3">
-              <label for="searchInput" class="form-label">
+              <label for="relationshipSearchInput" class="form-label">
                 Search {{ getEntityDisplayName(relatedEntity) }}
               </label>
-              <input
-                id="searchInput"
-                type="text"
-                class="form-control"
-                v-model="searchQuery"
-                @input="handleSearch"
-                placeholder="Type to search..."
-                :disabled="searching"
-              />
-              <div v-if="searching" class="mt-2">
-                <div class="spinner-border spinner-border-sm" role="status">
-                  <span class="visually-hidden">Searching...</span>
-                </div>
-              </div>
             </div>
-
-            <div v-if="searchResults.length > 0" class="list-group">
-              <button
-                v-for="result in searchResults"
-                :key="result.id"
-                type="button"
-                class="list-group-item list-group-item-action"
-                @click="selectRecord(result)"
-                :disabled="linking === result.id"
-              >
-                <div class="d-flex justify-content-between align-items-center">
-                  <span>{{ result.name }}</span>
-                  <span
-                    v-if="linking === result.id"
-                    class="spinner-border spinner-border-sm"
-                    role="status"
-                  ></span>
-                  <i v-else class="bi bi-chevron-right"></i>
-                </div>
-              </button>
-            </div>
-
-            <div v-else-if="searchQuery && !searching" class="text-muted text-center py-3">
-              No records found
-            </div>
-
-            <div v-else-if="!searchQuery" class="text-muted text-center py-3">
-              Enter a search term to find records
-            </div>
+            <RelationshipSearchSelect
+              input-id="relationshipSearchInput"
+              :related-entity="relatedEntity"
+              :disabled="!!linking"
+              :busy-id="linking"
+              :reset-key="resetKey"
+              @select="selectRecord"
+            />
           </div>
 
           <!-- Create New Tab -->
@@ -130,6 +95,7 @@ import { useMetadataStore } from '../stores/metadata'
 import { useToastStore } from '../stores/toast'
 import api from '../services/api'
 import RecordDetailView from './RecordDetailView.vue'
+import RelationshipSearchSelect from './RelationshipSearchSelect.vue'
 
 const props = defineProps({
   modelValue: {
@@ -169,10 +135,8 @@ const metadataStore = useMetadataStore()
 const toastStore = useToastStore()
 
 const activeTab = ref('link')
-const searchQuery = ref('')
-const searchResults = ref([])
-const searching = ref(false)
 const linking = ref(null)
+const resetKey = ref(0)
 
 const isVisible = computed({
   get: () => props.modelValue,
@@ -183,40 +147,10 @@ const isVisible = computed({
 watch(isVisible, (newVal) => {
   if (newVal) {
     activeTab.value = 'link'
-    searchQuery.value = ''
-    searchResults.value = []
     linking.value = null
+    resetKey.value += 1
   }
 })
-
-let searchTimeout = null
-async function handleSearch() {
-  if (searchTimeout) {
-    clearTimeout(searchTimeout)
-  }
-
-  if (!searchQuery.value || searchQuery.value.length < 2) {
-    searchResults.value = []
-    return
-  }
-
-  searchTimeout = setTimeout(async () => {
-    searching.value = true
-    try {
-      const response = await api.get(`/relationship/${props.relatedEntity}`, {
-        params: { search: searchQuery.value }
-      })
-      // Filter out the placeholder entry
-      searchResults.value = response.data.filter(item => item.id !== '')
-    } catch (err) {
-      console.error('Error searching:', err)
-      toastStore.error('Failed to search records')
-      searchResults.value = []
-    } finally {
-      searching.value = false
-    }
-  }, 300)
-}
 
 async function selectRecord(record) {
   linking.value = record.id
@@ -257,8 +191,6 @@ function getEntityDisplayName(entityName) {
 function close() {
   isVisible.value = false
   activeTab.value = 'link'
-  searchQuery.value = ''
-  searchResults.value = []
   linking.value = null
 }
 
@@ -306,4 +238,3 @@ function handleBackdropClick() {
   cursor: not-allowed;
 }
 </style>
-

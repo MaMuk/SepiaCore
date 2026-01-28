@@ -65,7 +65,9 @@ The frontend communicates with the backend via the configured API base URL. You 
    - Create a `.env` file in the `frontend` directory:
      ```
      VITE_API_BASE_URL=http://localhost:8001
+     # VITE_ALLOWED_HOSTS=dev-machine.local
      ```
+   - To allow additional dev hosts for the Vite server, set `VITE_ALLOWED_HOSTS` as a comma-separated list (e.g., `host1.local,host2.local`).
 
 2. **Runtime configuration** (via the application's configuration interface)
 
@@ -200,5 +202,4 @@ server {
 - The frontend should be built using `npm run build` before deployment
 - API requests are routed to `/api` which proxies to the backend
 - Adjust the backend routing path (`/backend`) if your backend is located elsewhere
-
 

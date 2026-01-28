@@ -892,6 +892,15 @@ function subpanelsChanged(current, original) {
   return false
 }
 
+function hasUnsavedChanges() {
+  const filteredRecordLayout = recordLayout.value.filter(row => row.length > 0)
+  const recordChanged = !layoutsEqual(filteredRecordLayout, originalRecordLayout.value)
+  const listChanged = !layoutsEqual(listLayout.value, originalListLayout.value)
+  const subpanelsHaveChanged = subpanelsChanged(subpanelLayouts.value, originalSubpanelLayouts.value)
+
+  return recordChanged || listChanged || subpanelsHaveChanged
+}
+
 // Save and Reset
 async function saveLayout() {
   if (!entityName.value) return
@@ -901,16 +910,19 @@ async function saveLayout() {
     const filteredRecordLayout = recordLayout.value.filter(row => row.length > 0)
     const recordChanged = !layoutsEqual(filteredRecordLayout, originalRecordLayout.value)
     
+    let updatedMetadata = null
+
     // Save record layout only if changed
     if (recordChanged) {
       const recordViewDef = {
         layout: filteredRecordLayout
       }
-      await api.post('/modulebuilder/updateView', {
+      const recordResponse = await api.post('/modulebuilder/updateView', {
         entity: entityName.value,
         view: 'record',
         viewDef: recordViewDef
       })
+      updatedMetadata = recordResponse.data?.metadata || updatedMetadata
     }
 
     // Save list layout only if changed
@@ -920,11 +932,12 @@ async function saveLayout() {
         isdefault: entityData.value?.module_views?.list?.isdefault || false,
         layout: listLayout.value
       }
-      await api.post('/modulebuilder/updateView', {
+      const listResponse = await api.post('/modulebuilder/updateView', {
         entity: entityName.value,
         view: 'list',
         viewDef: listViewDef
       })
+      updatedMetadata = listResponse.data?.metadata || updatedMetadata
     }
 
     // Save subpanels only if changed
@@ -945,17 +958,22 @@ async function saveLayout() {
         })
       }
 
-      await api.post('/modulebuilder/updateView', {
+      const subpanelResponse = await api.post('/modulebuilder/updateView', {
         entity: entityName.value,
         view: 'subpanels',
         viewDef: subpanelsToSave
       })
+      updatedMetadata = subpanelResponse.data?.metadata || updatedMetadata
     }
 
     // Only refresh metadata if something was actually saved
     if (recordChanged || listChanged || subpanelsHaveChanged) {
-      // Refresh metadata
-      await metadataStore.fetchMetadata()
+      // Refresh metadata from server response when available
+      if (updatedMetadata) {
+        metadataStore.setMetadata(updatedMetadata)
+      } else {
+        await metadataStore.fetchMetadata()
+      }
       
       // Update original layouts to reflect saved state
       if (recordChanged) {
@@ -1005,6 +1023,17 @@ watch(activeTab, (newTab) => {
     selectedSubpanelKey.value = null
   }
 })
+
+watch(
+  () => metadataStore.metadata,
+  () => {
+    if (saving.value || hasUnsavedChanges()) {
+      return
+    }
+
+    loadLayouts()
+  }
+)
 
 onMounted(async () => {
   if (!metadataStore.metadata) {
@@ -1154,4 +1183,3 @@ onMounted(async () => {
   font-weight: 600;
 }
 </style>
-

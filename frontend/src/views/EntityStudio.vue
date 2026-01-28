@@ -463,10 +463,28 @@ async function openDeleteEntity() {
 }
 
 // Watch for selectedEntity changes and close editors
-watch(selectedEntity, () => {
-  showLayoutEditor.value = false
-  showFieldEditor.value = false
+watch(selectedEntity, (next, prev) => {
+  if (next?.name !== prev?.name) {
+    showLayoutEditor.value = false
+    showFieldEditor.value = false
+  }
 })
+
+watch(
+  () => metadataStore.metadata,
+  () => {
+    if (!selectedEntity.value) {
+      return
+    }
+
+    const updatedEntity = metadataStore.getEntityMetadata(selectedEntity.value.name)
+    if (updatedEntity) {
+      Object.assign(selectedEntity.value, updatedEntity, {
+        displayName: metadataStore.formatEntityName(selectedEntity.value.name)
+      })
+    }
+  }
+)
 
 onMounted(async () => {
   if (!metadataStore.metadata) {
@@ -564,4 +582,3 @@ onMounted(async () => {
   opacity: 1;
 }
 </style>
-

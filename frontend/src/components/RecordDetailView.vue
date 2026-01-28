@@ -276,16 +276,26 @@ function initializeCreateMode() {
 function initializeEditMode() {
   if (!record.value) return
   
-  // Copy record data to form data
-  formData.value = { ...record.value }
-  
-  // Initialize collection fields if needed
+  // Copy only defined fields to form data to avoid sending extras (e.g. name on person entities)
+  const nextFormData = {}
   Object.keys(fieldDefinitions.value).forEach(fieldName => {
     const fieldDef = fieldDefinitions.value[fieldName]
-    if (fieldDef.type === 'collection' && !Array.isArray(formData.value[fieldName])) {
-      formData.value[fieldName] = []
+    const recordValue = record.value[fieldName]
+    if (recordValue !== undefined && recordValue !== null) {
+      nextFormData[fieldName] = recordValue
+      return
+    }
+
+    if (fieldDef.type === 'boolean' || fieldDef.type === 'checkbox') {
+      nextFormData[fieldName] = false
+    } else if (fieldDef.type === 'collection') {
+      nextFormData[fieldName] = []
+    } else {
+      nextFormData[fieldName] = ''
     }
   })
+
+  formData.value = nextFormData
 }
 
 function switchToEdit() {
@@ -304,7 +314,7 @@ async function handleSave() {
   try {
     // Prepare data for submission (exclude id, readonly fields)
     const submitData = {}
-    Object.keys(formData.value).forEach(fieldName => {
+    Object.keys(fieldDefinitions.value).forEach(fieldName => {
       const fieldDef = fieldDefinitions.value[fieldName]
       if (fieldDef?.readonly) return
       if (fieldName === 'id') return
@@ -440,4 +450,3 @@ function handleRelationshipClick({ entity, recordId }) {
   color: #ccc;
 }
 </style>
-

@@ -1,0 +1,11 @@
+Regressions:
+    Relationship fields do not work. (does not load slimselect)
+    Save, Edit, Subpanels do not work in mobile view (outside winbox)
+
+Old Issues:
+    Creating field does need two times before it takes (guess, only created in fielddefs and not in metadata)
+    Timezone in UI is not handled. documents created 31.10.2025 10:02:46 are displayed as 31.10.2025 09:02:46
+    Entity create in module builder does not show all available types of fields, not in sync with supported field types. also some types need more informations before they can be created, like select needs an options element
+Fixed Issues:
+    Creating Entity did not initially load fielddefs into metadata, only when rebuilding metadata, for example by creating another entity, were fielddefs loaded
+    Network Errors were not always communicated via notify (CORS security model has intentional broken UX and some types of errors, can not be pinned down when running backend on different server)

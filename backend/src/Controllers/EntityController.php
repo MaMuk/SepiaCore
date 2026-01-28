@@ -119,6 +119,7 @@ class EntityController extends BaseController
         if (isset($data['id'])) {
             unset($data['id']);
         }
+        $data = $this->filterEntityFields($data);
 
         try {
             $storedEntity = $this->entity->create($data);
@@ -154,6 +155,7 @@ class EntityController extends BaseController
         if (isset($data['id'])) {
             unset($data['id']);
         }
+        $data = $this->filterEntityFields($data);
 
         $storedEntity = $this->entity->read($id);
 
@@ -234,6 +236,21 @@ class EntityController extends BaseController
                 'disable_pagination' => $this->entity->noLimit === true || $totalItems < 1,
             ],
         ];
+    }
+
+    /**
+     * Filters incoming data to fields defined in metadata.
+     * @param array $data Incoming request data
+     * @return array Filtered data
+     */
+    protected function filterEntityFields(array $data): array
+    {
+        $fieldDefinitions = $GLOBALS['metadata']['entities'][$this->model]['fields'] ?? [];
+        if (empty($fieldDefinitions)) {
+            return $data;
+        }
+
+        return array_intersect_key($data, $fieldDefinitions);
     }
 
     /**

@@ -23,7 +23,9 @@ npm install
 2. Create a `.env` file (optional):
 ```env
 VITE_API_BASE_URL=http://localhost:8000
+# VITE_ALLOWED_HOSTS=dev-machine.local
 ```
+   - To allow additional dev hosts for the Vite server, set `VITE_ALLOWED_HOSTS` as a comma-separated list (e.g., `host1.local,host2.local`).
 
 3. Start development server:
 ```bash
@@ -71,4 +73,3 @@ The app uses token-based authentication. After successful login, the token is st
 The frontend communicates with the backend API. Make sure the backend is running and accessible at the configured API base URL (default: `http://localhost:8000`).
 
 The app automatically checks backend availability on startup via the `/ping` endpoint.
-
