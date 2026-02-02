@@ -406,6 +406,7 @@ function handleCreate() {
 
 <style scoped>
 .entity-list-view {
+  position: relative;
   padding: 1rem;
 }
 

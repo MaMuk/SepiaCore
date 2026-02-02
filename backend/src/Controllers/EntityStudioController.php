@@ -814,6 +814,14 @@ PHP;
         } else {
             $GLOBALS['metadata']['entities'][$entityKey]['isPerson'] = false;
         }
+        //set capabilities
+        $GLOBALS['metadata']['entities'][$entityKey]['capabilities'] = [
+            'action-console' =>
+                [
+                    'active' => 'true',
+                    'requires_admin' => false,
+                ],
+        ];
 
         // Store icon if provided
         if (!empty($newEntityData['icon'])) {

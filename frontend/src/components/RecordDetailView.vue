@@ -415,7 +415,7 @@ function handleRelationshipClick({ entity, recordId }) {
 }
 
 .action-buttons-bar {
-  background-color: #f5f5f5;
+  background-color: var(--actionbar-bg-color);
   margin: -1rem -1rem 1rem -1rem;
   padding: 0.75rem 1rem;
 }

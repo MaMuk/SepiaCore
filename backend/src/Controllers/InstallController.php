@@ -390,6 +390,21 @@ class InstallController extends BaseController
             });
         }
 
+        // Dashboards table
+        if (!Capsule::schema()->hasTable('dashboards')) {
+            Capsule::schema()->create('dashboards', function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('name')->nullable();
+                $table->uuid('owner')->nullable()->index();
+                $table->boolean('is_default')->default(0)->index();
+                $table->longText('widgets')->nullable();
+                $table->timestamp('date_created')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+                $table->timestamp('date_modified')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+
+                $table->foreign('owner')->references('id')->on('users')->onDelete('cascade');
+            });
+        }
+
         // --- 3. Insert admin user via your Entity class ---
         $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
         $users = $this->getEntityClass('users');
@@ -773,6 +788,13 @@ class InstallController extends BaseController
                         'password_hash' => ['type' => 'string'],
                         'isadmin' => ['type' => 'boolean'],
                     ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                    ]
                 ],
                 'tokens' => [
                     'fields' => [
@@ -791,6 +813,14 @@ class InstallController extends BaseController
                         'date_created' => ['type' => 'datetime', 'readonly' => true],
                         'date_modified' => ['type' => 'datetime', 'readonly' => true],
                     ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                    ]
+
                 ],
                 'endpoints' => [
                     'fields' => [
@@ -828,6 +858,13 @@ class InstallController extends BaseController
                         ],
                         'subpanels' => [],
                     ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                    ]
                 ],
                 'rawendpointdata' => [
                     'fields' => [
@@ -847,10 +884,42 @@ class InstallController extends BaseController
                         'date_created' => ['type' => 'datetime', 'readonly' => true],
                         'date_modified' => ['type' => 'datetime', 'readonly' => true],
                     ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                    ]
+                ],
+                'dashboards' => [
+                    'fields' => [
+                        'id' => ['type' => 'uuid'],
+                        'name' => ['type' => 'string'],
+                        'owner' => ['type' => 'relationship', 'entity' => 'users'],
+                        'is_default' => ['type' => 'boolean'],
+                        'widgets' => ['type' => 'collection'],
+                        'date_created' => ['type' => 'datetime', 'readonly' => true],
+                        'date_modified' => ['type' => 'datetime', 'readonly' => true],
+                    ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                    ]
                 ],
                 'modulebuilder' => [
                     'module_views' => [
                         'mbstudio' => ['isdefault' => 'true'],
+                    ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
             ],

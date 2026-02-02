@@ -11,6 +11,7 @@ use SepiaCore\Controllers\SystemController;
 use SepiaCore\Controllers\EndpointController;
 use SepiaCore\Controllers\OpenApiController;
 use SepiaCore\Controllers\UsersController;
+use SepiaCore\Controllers\DashboardController;
 
 // ==========================================
 // Public Routes (No Authentication)
@@ -177,6 +178,40 @@ Flight::route('GET /users/profile/me', function() {
 Flight::route('GET /users/@id/owned-records', function($id) {
     $controller = new UsersController();
     $controller->ownedRecords($id);
+});
+
+// ==========================================
+// Dashboard Routes
+// ==========================================
+
+Flight::route('GET /dashboard', function() {
+    $controller = new DashboardController();
+    $controller->default();
+});
+
+Flight::route('GET /dashboard/@id', function($id) {
+    $controller = new DashboardController();
+    $controller->showDashboard($id);
+});
+
+Flight::route('PUT /dashboard/@id', function($id) {
+    $controller = new DashboardController();
+    $controller->updateDashboard($id);
+});
+
+Flight::route('POST /dashboard', function() {
+    $controller = new DashboardController();
+    $controller->createDashboard();
+});
+
+Flight::route('PUT /dashboard/@id/default', function($id) {
+    $controller = new DashboardController();
+    $controller->setDefaultDashboard($id);
+});
+
+Flight::route('DELETE /dashboard/@id', function($id) {
+    $controller = new DashboardController();
+    $controller->deleteDashboard($id);
 });
 
 // ==========================================

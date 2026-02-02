@@ -1,46 +1,36 @@
 import { ref, computed, watch } from 'vue'
+import { useViewport } from './useViewport'
 
-const minimizedInstances = ref([])
 const isExpanded = ref(false)
-const minimizedContainerRef = ref(null)
+const lastNonMobileExpanded = ref(true)
+const { isMobile } = useViewport()
 
 export function useSidebar() {
-  const hasMinimizedWindows = computed(() => minimizedInstances.value.length > 0)
-  
   const isSidebarVisible = computed(() => {
     // Sidebar is always visible now
     return true
   })
 
-  // Auto-collapse when all windows are restored
-  watch(hasMinimizedWindows, (hasWindows) => {
-    if (!hasWindows) {
-      isExpanded.value = false
-    }
+  watch(isExpanded, (expanded) => {
+    if (isMobile.value) return
+    lastNonMobileExpanded.value = expanded
   })
 
-  function registerContainer(container) {
-    minimizedContainerRef.value = container
-  }
-
-  function addMinimizedInstance(winboxInstance) {
-    if (!minimizedInstances.value.find(w => w.id === winboxInstance.id)) {
-      minimizedInstances.value.push(winboxInstance)
+  watch(isMobile, (mobile) => {
+    if (mobile) {
+      isExpanded.value = false
+      return
     }
-  }
-
-  function removeMinimizedInstance(winboxInstance) {
-    const idx = minimizedInstances.value.findIndex(w => w.id === winboxInstance.id)
-    if (idx !== -1) {
-      minimizedInstances.value.splice(idx, 1)
-    }
-  }
+    isExpanded.value = lastNonMobileExpanded.value
+  })
 
   function toggleExpanded() {
+    if (isMobile.value) return
     isExpanded.value = !isExpanded.value
   }
 
   function expand() {
+    if (isMobile.value) return
     isExpanded.value = true
   }
 
@@ -49,17 +39,10 @@ export function useSidebar() {
   }
 
   return {
-    minimizedInstances,
     isExpanded,
-    hasMinimizedWindows,
     isSidebarVisible,
-    minimizedContainerRef,
-    registerContainer,
-    addMinimizedInstance,
-    removeMinimizedInstance,
     toggleExpanded,
     expand,
     collapse
   }
 }
-

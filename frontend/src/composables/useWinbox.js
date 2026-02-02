@@ -4,14 +4,298 @@ import { createApp } from 'vue'
 import RecordDetailView from '../components/RecordDetailView.vue'
 import UserOwnedRecordsView from '../components/UserOwnedRecordsView.vue'
 import { useMetadataStore } from '../stores/metadata'
-import { useSidebar } from './useSidebar'
+import { useWindowPane } from './useWindowPane'
+import { useViewport } from './useViewport'
 import { getIconPath } from '../utils/iconUtils'
 
 let winboxInstances = ref([])
+let windowPaneWatcherInitialized = false
+/* Trigger Hack für Vue-Reaktivität: WinBox-State und DOM-Klassen entstehen ausserhalb von Vue,
+   damit die Sidebar nicht mit veralteten Daten läuft. */
+const sidebarPulse = ref(0)
 
 export function useWinbox() {
   const metadataStore = useMetadataStore()
-  const { minimizedContainerRef, addMinimizedInstance, removeMinimizedInstance } = useSidebar()
+  const { paneContainerRef, isExpanded: isWindowPaneExpanded } = useWindowPane()
+  const { isMobile } = useViewport()
+
+  function getWinboxWindowElement(winboxInstance) {
+    return winboxInstance?.body?.parentNode || null
+  }
+
+  function applyNormalWindowStyles(wbWindow) {
+    if (!wbWindow) return
+    wbWindow.style.position = ''
+    wbWindow.style.right = ''
+    wbWindow.style.bottom = ''
+    wbWindow.classList.remove('windowpane-attached')
+    wbWindow.classList.remove('window-mobile-attached')
+    wbWindow.classList.remove('no-move')
+    wbWindow.classList.remove('no-resize')
+    wbWindow.classList.remove('no-max')
+    wbWindow.classList.add('rounded-2')
+    const wbHeader = wbWindow.querySelector('.wb-header')
+    if (wbHeader) {
+      wbHeader.classList.add('rounded-top-2')
+      wbHeader.classList.remove('border-bottom')
+      wbHeader.style.backgroundColor = ''
+      const wbMax = wbHeader.querySelector('.wb-max')
+      if (wbMax) {
+        wbMax.style.display = 'block'
+      }
+      const wbMin = wbHeader.querySelector('.wb-min')
+      if (wbMin) {
+        wbMin.style.display = 'block'
+      }
+    }
+    const control = wbWindow.querySelector('.wb-control')
+    if (control) {
+      control.style.display = 'flex'
+    }
+  }
+
+  function applyMobileWindowStyles(wbWindow) {
+    if (!wbWindow) return
+    wbWindow.style.position = ''
+    wbWindow.style.right = ''
+    wbWindow.style.bottom = ''
+    wbWindow.style.width = '100%'
+    wbWindow.style.height = '100%'
+    wbWindow.classList.remove('windowpane-attached')
+    wbWindow.classList.add('window-mobile-attached')
+    wbWindow.classList.add('no-move')
+    wbWindow.classList.add('no-resize')
+    wbWindow.classList.add('no-max')
+    wbWindow.classList.add('rounded-2')
+    const wbHeader = wbWindow.querySelector('.wb-header')
+    if (wbHeader) {
+      wbHeader.classList.add('rounded-top-2')
+      wbHeader.classList.remove('border-bottom')
+      wbHeader.style.backgroundColor = ''
+      const wbMin = wbHeader.querySelector('.wb-min')
+      if (wbMin) {
+        wbMin.style.display = 'none'
+      }
+      const wbMax = wbHeader.querySelector('.wb-max')
+      if (wbMax) {
+        wbMax.style.display = 'none'
+      }
+    }
+    const control = wbWindow.querySelector('.wb-control')
+    if (control) {
+      control.style.display = 'flex'
+    }
+    const wbMax = wbHeader.querySelector('.wb-max')
+    if (wbMax) {
+      wbMax.style.display = 'none'
+    }
+  }
+
+  function applyPaneWindowStyles(wbWindow) {
+    if (!wbWindow) return
+    wbWindow.style.position = ''
+    wbWindow.style.top = '0'
+    wbWindow.style.left = '0'
+    wbWindow.style.right = '0'
+    wbWindow.style.bottom = '0'
+    wbWindow.style.width = '100%'
+    wbWindow.style.height = '100%'
+    wbWindow.classList.add('windowpane-attached')
+    wbWindow.classList.remove('window-mobile-attached')
+    wbWindow.classList.add('no-move')
+    wbWindow.classList.add('no-resize')
+    wbWindow.classList.add('no-max')
+    wbWindow.classList.add('rounded-2')
+    const wbHeader = wbWindow.querySelector('.wb-header')
+    if (wbHeader) {
+      wbHeader.classList.remove('rounded-top-2')
+      wbHeader.classList.remove('border-bottom')
+      wbHeader.style.backgroundColor = ''
+      const wbMax = wbHeader.querySelector('.wb-max')
+      if (wbMax) {
+        wbMax.style.display = 'none'
+      }
+      const wbMin = wbHeader.querySelector('.wb-min')
+      if (wbMin) {
+        wbMin.style.display = 'block'
+      }
+    }
+    const control = wbWindow.querySelector('.wb-control')
+    if (control) {
+      control.style.display = 'flex'
+    }
+  }
+
+  function maximizeWinbox(winboxInstance) {
+    if (typeof winboxInstance?.maximize === 'function') {
+      winboxInstance.maximize()
+    } else if (typeof winboxInstance?.max === 'function') {
+      winboxInstance.max()
+    }
+  }
+
+  function minimizeWinbox(winboxInstance) {
+    if (typeof winboxInstance?.minimize === 'function') {
+      winboxInstance.minimize()
+    } else if (typeof winboxInstance?.min === 'function') {
+      winboxInstance.min()
+    }
+  }
+
+  function showWinbox(winboxInstance) {
+    if (typeof winboxInstance?.show === 'function') {
+      winboxInstance.show()
+    }
+  }
+
+  function hideWinbox(winboxInstance) {
+    if (typeof winboxInstance?.hide === 'function') {
+      winboxInstance.hide()
+    }
+  }
+
+
+  function bumpSidebarPulse() {
+    sidebarPulse.value += 1
+  }
+
+  function setWinboxTitle(winboxInstance, title) {
+    if (typeof winboxInstance?.setTitle === 'function') {
+      winboxInstance.setTitle(title)
+      bumpSidebarPulse()
+    }
+  }
+
+  function attachToPane(winboxInstance) {
+    const paneContainer = paneContainerRef.value
+    const wbWindow = getWinboxWindowElement(winboxInstance)
+    if (!paneContainer || !wbWindow) return false
+    if (wbWindow.parentNode !== paneContainer) {
+      paneContainer.appendChild(wbWindow)
+    }
+    applyPaneWindowStyles(wbWindow)
+    return true
+  }
+
+  function attachToBody(winboxInstance, forceRestore = false) {
+    const wbWindow = getWinboxWindowElement(winboxInstance)
+    if (!wbWindow) return
+    if (wbWindow.parentNode !== document.body) {
+      document.body.appendChild(wbWindow)
+    }
+    if (typeof winboxInstance?.restore === 'function') {
+      winboxInstance.restore()
+    }
+    if (isMobile.value) {
+      applyMobileWindowStyles(wbWindow)
+    } else {
+      applyNormalWindowStyles(wbWindow)
+    }
+  }
+
+  function ensureFloatingPosition(winboxInstance) {
+    const wbWindow = getWinboxWindowElement(winboxInstance)
+    if (!wbWindow) return
+    const style = wbWindow.style
+    const hasPosition =
+      style.left || style.top || style.width || style.height
+    if (hasPosition) return
+    const width = winboxInstance?.width || 800
+    const height = winboxInstance?.height || 600
+    const x = typeof winboxInstance?.x === 'number' ? winboxInstance.x : 90
+    const y = typeof winboxInstance?.y === 'number' ? winboxInstance.y : 148
+    if (typeof winboxInstance?.resize === 'function') {
+      winboxInstance.resize(width, height)
+    }
+    if (typeof winboxInstance?.move === 'function') {
+      winboxInstance.move(x, y)
+    }
+  }
+
+  function detachFromPane(winboxInstance) {
+    const paneContainer = paneContainerRef.value
+    const wbWindow = getWinboxWindowElement(winboxInstance)
+    if (!paneContainer || !wbWindow) return
+    if (wbWindow.parentNode === paneContainer) {
+      attachToBody(winboxInstance)
+      ensureFloatingPosition(winboxInstance)
+    }
+  }
+
+  function minimizeAllExcept(exceptId) {
+    winboxInstances.value.forEach(winboxInstance => {
+      if (!winboxInstance || winboxInstance.closed) return
+      if (winboxInstance.id === exceptId) return
+      if (winboxInstance.min) return
+      minimizeWinbox(winboxInstance)
+    })
+  }
+
+  function attachToPaneWithRetry(winboxInstance) {
+    if (attachToPane(winboxInstance)) {
+      maximizeWinbox(winboxInstance)
+      applyPaneWindowStyles(getWinboxWindowElement(winboxInstance))
+      return
+    }
+    nextTick(() => {
+      if (attachToPane(winboxInstance)) {
+        maximizeWinbox(winboxInstance)
+        applyPaneWindowStyles(getWinboxWindowElement(winboxInstance))
+      }
+    })
+  }
+
+  function ensureWindowPaneAttachment(winboxInstance) {
+    if (!isWindowPaneExpanded.value) {
+      attachToBody(winboxInstance)
+      if (isMobile.value) {
+        maximizeWinbox(winboxInstance)
+      }
+      return
+    }
+    minimizeAllExcept(winboxInstance.id)
+    attachToPaneWithRetry(winboxInstance)
+  }
+
+  if (!windowPaneWatcherInitialized) {
+    windowPaneWatcherInitialized = true
+    watch(isWindowPaneExpanded, (expanded) => {
+      if (expanded) {
+        const candidates = winboxInstances.value.filter(winboxInstance => {
+          return winboxInstance && !winboxInstance.closed && !winboxInstance.min
+        })
+        if (candidates.length === 0) return
+        const active = candidates[candidates.length - 1]
+        minimizeAllExcept(active.id)
+        attachToPaneWithRetry(active)
+      } else {
+        winboxInstances.value.forEach(winboxInstance => {
+          if (!winboxInstance || winboxInstance.closed) return
+          detachFromPane(winboxInstance)
+        })
+      }
+    })
+    watch(isMobile, (mobile) => {
+      if (!mobile) return
+      winboxInstances.value.forEach(winboxInstance => {
+        if (!winboxInstance || winboxInstance.closed) return
+        attachToBody(winboxInstance)
+        maximizeWinbox(winboxInstance)
+      })
+    })
+    watch(isMobile, (mobile) => {
+      if (mobile) return
+      winboxInstances.value.forEach(winboxInstance => {
+        if (!winboxInstance || winboxInstance.closed) return
+        if (isWindowPaneExpanded.value) {
+          ensureWindowPaneAttachment(winboxInstance)
+          return
+        }
+        attachToBody(winboxInstance)
+        ensureFloatingPosition(winboxInstance)
+      })
+    })
+  }
 
   function openRecordWindow(entityName, recordId = null, mode = 'detail', recordName = null) {
     // Create unique ID for this window
@@ -20,11 +304,16 @@ export function useWinbox() {
     // Check for existing window by ID
     const existing = winboxInstances.value.find(w => w.id === windowId)
     if (existing) {
-      // If window is minimized, restore it
-      if (existing.min) {
+      if (isWindowPaneExpanded.value) {
+        minimizeAllExcept(existing.id)
+        if (existing.min) {
+          existing.restore()
+        } else {
+          attachToPaneWithRetry(existing)
+        }
+      } else if (existing.min) {
         existing.restore()
       }
-      // Focus the existing window
       existing.focus()
       return existing
     }
@@ -87,85 +376,50 @@ export function useWinbox() {
         }
       },
       onminimize: function() {
-        const wbWindow = this.body.parentNode
-        // Add instance first to make sidebar visible
-        addMinimizedInstance(winbox)
-        
-        // Wait for container to be available, then append
-        nextTick(() => {
-          const minimizedContainer = minimizedContainerRef.value
-          if (minimizedContainer) {
-            minimizedContainer.appendChild(wbWindow)
-            wbWindow.style.position = 'static'
-            const wbHeader = wbWindow.querySelector('.wb-header')
-            wbWindow.classList.remove('rounded-2')
-            if (wbHeader) {
-              wbHeader.classList.remove('rounded-top-2')
-              wbHeader.classList.add('border-bottom')
-              wbHeader.style.backgroundColor = 'rgb(92, 146, 193)'
-              const wbMax = wbHeader.querySelector('.wb-max')
-              if (wbMax) {
-                wbMax.style.display = 'none'
-              }
-            }
-          }
-        })
+        hideWinbox(winbox)
+        bumpSidebarPulse()
       },
       onrestore: function() {
-        const minimizedContainer = minimizedContainerRef.value
-        if (minimizedContainer) {
-          const wbWindow = this.body.parentNode
-          // Check if window is in the minimized container
-          if (minimizedContainer.contains(wbWindow)) {
-            // Remove from minimized container and append to body
-            minimizedContainer.removeChild(wbWindow)
-            document.body.appendChild(wbWindow)
-            
-            // Restore control display
-            const control = wbWindow.querySelector('.wb-control')
-            if (control) {
-              control.style.display = 'flex'
-            }
-            
-            // Restore window styling
-            wbWindow.style.position = ''
-            const wbHeader = wbWindow.querySelector('.wb-header')
-            wbWindow.classList.add('rounded-2')
-            if (wbHeader) {
-              wbHeader.classList.add('rounded-top-2')
-              wbHeader.classList.remove('border-bottom')
-              wbHeader.style.backgroundColor = ''
-              const wbMax = wbHeader.querySelector('.wb-max')
-              if (wbMax) {
-                wbMax.style.display = 'block'
-              }
-            }
-            removeMinimizedInstance(winbox)
-          }
+        showWinbox(winbox)
+        if (isWindowPaneExpanded.value) {
+          minimizeAllExcept(winbox.id)
+          attachToPaneWithRetry(winbox)
+        } else {
+          attachToBody(winbox)
+          ensureFloatingPosition(winbox)
         }
+        bumpSidebarPulse()
+      },
+      onfocus: function() {
+        this.__isFocused = true
+        bumpSidebarPulse()
+      },
+      onblur: function() {
+        this.__isFocused = false
+        bumpSidebarPulse()
       },
       onclose: function() {
         // Clean up Vue app
         if (app) {
           app.unmount()
         }
-        // Remove from minimized instances if it was minimized
-        removeMinimizedInstance(winbox)
         // Remove from instances using the window ID
         const idx = winboxInstances.value.findIndex(w => w.id === windowId)
         if (idx !== -1) {
           winboxInstances.value.splice(idx, 1)
         }
+        bumpSidebarPulse()
         return false // Allow close
       }
     })
+    winbox.__sidebarIcon = iconPath
 
     // Watch mode changes to update title
     watch(modeRef, (newMode) => {
       if (newMode === 'edit' && recordNameRef.value) {
-        winbox.setTitle(`Edit ${recordNameRef.value}`)
+        setWinboxTitle(winbox, `Edit ${recordNameRef.value}`)
       } else if (newMode === 'detail' && recordNameRef.value) {
-        winbox.setTitle(recordNameRef.value)
+        setWinboxTitle(winbox, recordNameRef.value)
       }
     })
 
@@ -209,12 +463,12 @@ export function useWinbox() {
           
           if (savedRecordName) {
             recordNameRef.value = savedRecordName
-            winbox.setTitle(savedRecordName)
+            setWinboxTitle(winbox, savedRecordName)
           } else {
-            winbox.setTitle(`${entityDisplayName} - ${recordIdRef.value?.substring(0, 8) || 'Detail'}`)
+            setWinboxTitle(winbox, `${entityDisplayName} - ${recordIdRef.value?.substring(0, 8) || 'Detail'}`)
           }
         } else {
-          winbox.setTitle(`${entityDisplayName} - ${recordIdRef.value?.substring(0, 8) || 'Detail'}`)
+          setWinboxTitle(winbox, `${entityDisplayName} - ${recordIdRef.value?.substring(0, 8) || 'Detail'}`)
         }
         modeRef.value = 'detail'
       },
@@ -228,9 +482,9 @@ export function useWinbox() {
         if (data.recordName && !recordNameRef.value) {
           recordNameRef.value = data.recordName
           if (modeRef.value === 'detail') {
-            winbox.setTitle(data.recordName)
+            setWinboxTitle(winbox, data.recordName)
           } else if (modeRef.value === 'edit') {
-            winbox.setTitle(`Edit ${data.recordName}`)
+            setWinboxTitle(winbox, `Edit ${data.recordName}`)
           }
         }
       },
@@ -257,6 +511,14 @@ export function useWinbox() {
 
     // Store winbox instance directly in array (like old approach)
     winboxInstances.value.push(winbox)
+    bumpSidebarPulse()
+
+    if (isMobile.value) {
+      attachToBody(winbox)
+      maximizeWinbox(winbox)
+    } else if (isWindowPaneExpanded.value) {
+      ensureWindowPaneAttachment(winbox)
+    }
 
     return winbox
   }
@@ -268,12 +530,13 @@ export function useWinbox() {
       }
     })
     winboxInstances.value = []
+    bumpSidebarPulse()
   }
 
   return {
     openRecordWindow,
     closeAll,
-    instances: winboxInstances
+    instances: winboxInstances,
+    sidebarPulse
   }
 }
-
