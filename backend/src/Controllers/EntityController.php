@@ -212,6 +212,287 @@ class EntityController extends BaseController
     }
 
     /**
+     * Filters records by field parameters or stored filter id.
+     * @param string $model Entity model name
+     * @return void
+     */
+    public function filter($model): void
+    {
+        $this->model = $model;
+        $this->entity = $this->getEntityClass($model);
+
+        $request = Flight::request();
+        $params = $this->getPaginationParams();
+        $payload = $request->data->getData();
+
+        $filterId = $payload['filter_id'] ?? ($request->query['filter_id'] ?? null);
+        $filters = $payload['filters'] ?? [];
+        $storedFilter = null;
+
+        if ($filterId !== null && $filterId !== '') {
+            $storedFilter = $this->getStoredFilterDefinition($model, $filterId, $payload);
+            if (!$storedFilter) {
+                $this->jsonHalt(['error' => "Stored filter '$filterId' not found"], 404);
+            }
+            if (empty($filters)) {
+                $filters = $storedFilter['filters'] ?? [];
+            }
+        }
+
+        $normalizedFilters = $this->normalizeFilters($filters);
+        if (empty($normalizedFilters)) {
+            $this->jsonHalt(['error' => 'No filters provided'], 400);
+        }
+
+        $result = $this->runFilterScan($normalizedFilters, $params, $payload);
+        $response = [
+            'records' => $result['records'],
+            'total' => $result['total'],
+        ];
+        if ($storedFilter) {
+            $response['filter'] = $storedFilter;
+        }
+
+        $this->jsonResponse($response);
+    }
+
+    /**
+     * @param string $model
+     * @param mixed $filterId
+     * @param array $payload
+     * @return array|null
+     */
+    protected function getStoredFilterDefinition(string $model, $filterId, array $payload): ?array
+    {
+        if ((int) $filterId !== 1) {
+            return null;
+        }
+
+        $fields = $GLOBALS['metadata']['entities'][$model]['fields'] ?? [];
+        $targetField = 'name';
+        if (!array_key_exists($targetField, $fields)) {
+            $targetField = array_key_exists('title', $fields) ? 'title' : null;
+        }
+        if (!$targetField) {
+            $targetField = array_key_first($fields) ?: 'id';
+        }
+
+        $value = $payload['value'] ?? ($payload['query'] ?? null);
+        $filters = [];
+        if ($value !== null && $value !== '') {
+            $filters[] = [
+                'field' => $targetField,
+                'operator' => 'contains',
+                'value' => $value,
+            ];
+        } else {
+            $filters[] = [
+                'field' => $targetField,
+                'operator' => 'not_empty',
+            ];
+        }
+
+        return [
+            'id' => 1,
+            'name' => "Mock filter: {$targetField}",
+            'filters' => $filters,
+        ];
+    }
+
+    /**
+     * @param mixed $filters
+     * @return array<int, array{field: string, operator: string, value: mixed}>
+     */
+    protected function normalizeFilters($filters): array
+    {
+        if (!is_array($filters)) {
+            return [];
+        }
+
+        $normalized = [];
+        $keys = array_keys($filters);
+        $isAssoc = $keys !== range(0, count($keys) - 1);
+
+        if ($isAssoc) {
+            foreach ($filters as $field => $value) {
+                if ($field === '') {
+                    continue;
+                }
+                $normalized[] = [
+                    'field' => $field,
+                    'operator' => 'eq',
+                    'value' => $value,
+                ];
+            }
+            return $normalized;
+        }
+
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) {
+                continue;
+            }
+            $field = $filter['field'] ?? null;
+            if (!$field) {
+                continue;
+            }
+            $normalized[] = [
+                'field' => $field,
+                'operator' => $filter['operator'] ?? 'eq',
+                'value' => $filter['value'] ?? null,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @param array $params
+     * @param array $payload
+     * @return array{records: array, total: int}
+     */
+    protected function runFilterScan(array $filters, array $params, array $payload): array
+    {
+        $limit = max(1, intval($payload['limit'] ?? $params['limit']));
+        $page = max(1, intval($payload['page'] ?? $params['page']));
+        $sortBy = $payload['sort'] ?? $params['sortBy'];
+        $sortOrder = strtoupper($payload['order'] ?? $params['sortOrder']);
+        $batchSize = min(200, max(50, $limit * 3));
+
+        $offset = ($page - 1) * $limit;
+        $matches = [];
+        $totalMatches = 0;
+        $pageIndex = 1;
+
+        while (true) {
+            $records = $this->entity->read(null, $pageIndex, $batchSize, $sortBy, $sortOrder, null);
+            if (!is_array($records) || count($records) === 0) {
+                break;
+            }
+
+            foreach ($records as $record) {
+                if (!$this->recordMatchesFilters($record, $filters)) {
+                    continue;
+                }
+
+                if ($totalMatches >= $offset && count($matches) < $limit) {
+                    $matches[] = $record;
+                }
+                $totalMatches++;
+            }
+
+            if (count($records) < $batchSize) {
+                break;
+            }
+
+            $pageIndex++;
+        }
+
+        return [
+            'records' => $matches,
+            'total' => $totalMatches,
+        ];
+    }
+
+    /**
+     * @param array $record
+     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @return bool
+     */
+    protected function recordMatchesFilters(array $record, array $filters): bool
+    {
+        foreach ($filters as $filter) {
+            $field = $filter['field'] ?? null;
+            if (!$field) {
+                continue;
+            }
+
+            $operator = strtolower($filter['operator'] ?? 'eq');
+            $expected = $filter['value'] ?? null;
+            $actual = $record[$field] ?? null;
+
+            switch ($operator) {
+                case 'contains':
+                    if ($actual === null) {
+                        return false;
+                    }
+                    if (stripos((string) $actual, (string) $expected) === false) {
+                        return false;
+                    }
+                    break;
+                case 'starts_with':
+                    if ($actual === null) {
+                        return false;
+                    }
+                    $actualString = (string) $actual;
+                    $expectedString = (string) $expected;
+                    if (stripos($actualString, $expectedString) !== 0) {
+                        return false;
+                    }
+                    break;
+                case 'ends_with':
+                    if ($actual === null) {
+                        return false;
+                    }
+                    $actualString = (string) $actual;
+                    $expectedString = (string) $expected;
+                    if ($expectedString === '' || strcasecmp(substr($actualString, -strlen($expectedString)), $expectedString) !== 0) {
+                        return false;
+                    }
+                    break;
+                case 'in':
+                    $list = is_array($expected) ? $expected : explode(',', (string) $expected);
+                    if (!in_array($actual, $list, false)) {
+                        return false;
+                    }
+                    break;
+                case 'gt':
+                    if (floatval($actual) <= floatval($expected)) {
+                        return false;
+                    }
+                    break;
+                case 'gte':
+                    if (floatval($actual) < floatval($expected)) {
+                        return false;
+                    }
+                    break;
+                case 'lt':
+                    if (floatval($actual) >= floatval($expected)) {
+                        return false;
+                    }
+                    break;
+                case 'lte':
+                    if (floatval($actual) > floatval($expected)) {
+                        return false;
+                    }
+                    break;
+                case 'not_empty':
+                    if ($actual === null || $actual === '') {
+                        return false;
+                    }
+                    break;
+                default:
+                    if (is_array($expected)) {
+                        if (!in_array($actual, $expected, false)) {
+                            return false;
+                        }
+                    } elseif (is_numeric($expected) && is_numeric($actual)) {
+                        if (floatval($actual) !== floatval($expected)) {
+                            return false;
+                        }
+                    } else {
+                        if ((string) $actual !== (string) $expected) {
+                            return false;
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Prepares data for list view.
      * @param array $records Records array
      * @param array $params Pagination parameters

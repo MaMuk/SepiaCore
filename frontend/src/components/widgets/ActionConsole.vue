@@ -1,772 +1,1189 @@
 <template>
-  <div class="action-console">
-    <div ref="outputRef" class="console-output">
-      <div v-for="(entry, index) in history" :key="index" class="console-line">
-        <span v-if="entry.prefix" class="console-prefix">{{ entry.prefix }}</span>
-        <span class="console-text">{{ entry.text }}</span>
-      </div>
-      <div class="console-line console-active">
-        <span class="console-prefix">$</span>
-        <div class="console-input-wrapper">
-          <span v-if="ghostSuffix" class="console-ghost">
-            <span class="console-ghost-prefix">{{ input }}</span>
-            <span class="console-ghost-suffix">{{ ghostSuffix }}</span>
-          </span>
-          <input
-            v-model="input"
+  <div class="action-console h-100 d-flex flex-column">
+    <div class="console-input-row">
+      <span class="console-prefix input-prefix">$</span>
+      <div class="input-shell">
+        <input
+            ref="inputRef"
+            v-model="inputValue"
             type="text"
-            class="console-input-field"
+            class="console-input"
+            autocomplete="off"
+            spellcheck="false"
             placeholder="Type a command..."
-            @input="updateSuggestions"
-            @keydown="handleKeydown"
-          />
+            @keydown="handleKeyDown"
+            @input="handleInputChange"
+        />
+        <div class="ghost-layer" aria-hidden="true">
+          <span class="ghost-base">{{ inputValue }}</span>
+          <span v-if="ghostText" class="ghost-suffix">{{ ghostText }}</span>
         </div>
       </div>
-      <div v-if="showHistoryNav && historyWindow.length" class="console-suggestions console-history">
+    </div>
+
+    <div v-if="panelMode" class="console-panel">
+      <template v-if="panelMode === 'history'">
+        <div class="panel-label">History</div>
         <div
-          v-for="(entry, index) in historyWindow"
-          :key="`history-${index}`"
-          class="console-suggestion history-entry"
-          :class="{ active: index === 1 }"
+            v-for="item in historyPreview"
+            :key="`preview-${item.role}`"
+            class="preview-line"
+            :class="{ active: item.role === 'current' }"
         >
-          {{ entry || '' }}
+          <span class="preview-role">{{ item.role === 'current' ? '•' : '' }}</span>
+          <span class="preview-text">{{ item.value }}</span>
         </div>
-      </div>
-      <div v-else-if="searchResults.length || searchLoading" class="console-suggestions console-search-results">
-        <div v-if="searchLoading" class="console-suggestion console-search-loading">
-          Searching...
+      </template>
+
+      <template v-else-if="panelMode === 'results'">
+        <div class="panel-label">
+          {{ resultsPersisted ? 'Results' : 'Live Results' }}
         </div>
-        <button
-          v-for="(result, index) in searchResults"
-          :key="`${result.entityName}-${result.id}`"
-          class="console-suggestion"
-          type="button"
-          :class="{ active: index === activeSearchResult }"
-          @click="openSearchResult(result, { auto: false })"
-        >
-          {{ result.label || result.name || result.id }}
-        </button>
-      </div>
-      <div v-else-if="suggestions.length" class="console-suggestions">
-        <button
-          v-for="(suggestion, index) in suggestions"
-          :key="suggestion"
-          class="console-suggestion"
-          type="button"
-          :class="{ active: index === activeSuggestion }"
-          @click="applySuggestion(suggestion)"
-        >
-          {{ suggestion }}
-        </button>
+        <div class="chip-row">
+          <button
+              v-for="(result, index) in resultItems"
+              :key="`result-${result.entityName}-${result.id}`"
+              class="chip"
+              :class="{ active: index === activeResultIndex }"
+              type="button"
+              @mousedown.prevent
+              @click="openResult(result, index)"
+          >
+            <span class="chip-label">{{ result.label }}</span>
+            <small class="chip-meta">{{ formatEntityName(result.entityName) }}</small>
+          </button>
+        </div>
+        <div v-if="!resultItems.length && resultStatusMessage" class="panel-empty">
+          {{ resultStatusMessage }}
+        </div>
+      </template>
+
+      <template v-else-if="panelMode === 'suggestions'">
+        <div class="chip-row">
+          <button
+              v-for="(suggestion, index) in suggestions"
+              :key="`suggestion-${suggestion.type}-${suggestion.value}-${index}`"
+              class="chip"
+              :class="{ active: index === activeSuggestionIndex }"
+              type="button"
+              @mousedown.prevent
+              @click="acceptSuggestion(suggestion, index)"
+          >
+            <span class="chip-label">{{ suggestion.label }}</span>
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <div ref="outputRef" class="console-output flex-grow-1">
+      <div
+          v-for="(line, index) in historyLines"
+          :key="`history-${index}-${line.text}`"
+          class="console-line"
+      >
+        <span class="console-prefix" :class="line.prefix === '$' ? 'prefix-user' : 'prefix-system'">
+          {{ line.prefix }}
+        </span>
+        <span class="console-text">{{ line.text }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useMetadataStore } from '../../stores/metadata'
 import { useAuthStore } from '../../stores/auth'
+import { useToastStore } from '../../stores/toast'
 import { useWinbox } from '../../composables/useWinbox'
 import entityService from '../../services/entityService'
-import { LIST_LIMIT } from '../../config'
+import { getListLimit } from '../../config'
+
+const COMMANDS = ['search', 'filter', 'new', 'help', 'clear']
+const OPERATORS = ['eq', 'contains', 'starts_with', 'ends_with', 'not_empty', 'gt', 'gte', 'lt', 'lte']
+const HISTORY_STORAGE_PREFIX = 'action_console_history'
+const LIVE_SEARCH_DEBOUNCE = 200
+const LIVE_FILTER_DEBOUNCE = 250
+const RESULT_PREVIEW_LIMIT = 5
 
 const metadataStore = useMetadataStore()
 const authStore = useAuthStore()
+const toastStore = useToastStore()
 const { openRecordWindow } = useWinbox()
 
-const input = ref('')
-const history = ref([])
+const inputValue = ref('')
+const historyLines = ref([])
 const suggestions = ref([])
-const activeSuggestion = ref(0)
+const activeSuggestionIndex = ref(0)
+const resultItems = ref([])
+const activeResultIndex = ref(0)
+const resultsSource = ref(null) // 'live-search', 'live-filter', 'command-search', 'command-filter'
+const resultsPersisted = ref(false)
+const persistedResultsCommand = ref('')
+const resultStatusMessage = ref('')
+
+const commandHistory = ref([])
+const historyNavActive = ref(false)
+const historyNavIndex = ref(-1)
+
+const storedFilters = ref({})
+const listLimit = ref(getListLimit())
+
+const inputRef = ref(null)
 const outputRef = ref(null)
-const historyNavIndex = ref(null)
-const showHistoryNav = ref(false)
-const searchResults = ref([])
-const activeSearchResult = ref(0)
-const searchLoading = ref(false)
-let searchTimeout = null
-let latestSearchKey = ''
-const lastAutoOpenedKey = ref('')
 
-const commands = ['search', 'new', 'filter', 'help', 'clear']
+let liveSearchTimeout = null
+let liveFilterTimeout = null
+let liveSearchRequestId = 0
+let liveFilterRequestId = 0
 
-const actionConsoleEntities = computed(() => {
-  const entityMap = metadataStore.entities || {}
-  return Object.keys(entityMap).filter((entityName) => {
-    return isEntityAllowed(entityName)
-  })
+const availableEntities = computed(() => {
+  const entities = metadataStore.entities || {}
+  return Object.keys(entities)
+      .filter(name => isEntityAllowed(name))
+      .map(name => ({
+        name,
+        displayName: formatEntityName(name),
+        meta: entities[name]
+      }))
 })
 
-function ensureMetadataLoaded() {
-  if (!metadataStore.metadata && !metadataStore.loading) {
-    return metadataStore.fetchMetadata().catch(() => {})
-  }
-  return Promise.resolve()
-}
+const historyStorageKey = computed(() => {
+  const user = authStore.username || 'anonymous'
+  return `${HISTORY_STORAGE_PREFIX}_${user}`
+})
 
-function updateSuggestions() {
-  const value = input.value
-  suggestions.value = buildSuggestions(value)
-  activeSuggestion.value = 0
-  if (!value) {
-    showHistoryNav.value = false
-    historyNavIndex.value = null
-  }
-  scheduleSearch(value)
-}
+const panelMode = computed(() => {
+  if (historyNavActive.value && historyPreview.value.length) return 'history'
+  if (resultItems.value.length > 0 || resultStatusMessage.value) return 'results'
+  if (suggestions.value.length > 0) return 'suggestions'
+  return null
+})
 
-function buildSuggestions(value) {
-  const trimmed = value.trimStart()
-  if (!trimmed) {
-    return commands.slice(0, 5)
-  }
+const historyPreview = computed(() => {
+  if (!historyNavActive.value || historyNavIndex.value < 0) return []
+  const items = []
+  const prev = commandHistory.value[historyNavIndex.value - 1]
+  const current = commandHistory.value[historyNavIndex.value]
+  const next = commandHistory.value[historyNavIndex.value + 1]
+  if (prev !== undefined) items.push({ role: 'previous', value: prev })
+  if (current !== undefined) items.push({ role: 'current', value: current })
+  if (next !== undefined) items.push({ role: 'next', value: next })
+  return items
+})
 
-  const parts = trimmed.split(/\s+/)
-  const commandPart = parts[0]
-  const hasTrailingSpace = value.endsWith(' ')
-  const currentToken = hasTrailingSpace ? '' : (parts[parts.length - 1] || '')
+const ghostText = computed(() => {
+  if (panelMode.value !== 'suggestions') return ''
+  if (!inputValue.value.trim()) return ''
+  const suggestion = suggestions.value[activeSuggestionIndex.value]
+  if (!suggestion) return ''
+  const token = getCurrentToken()
+  const insertValue = suggestion.insertValue || suggestion.value || ''
+  if (!insertValue.toLowerCase().startsWith(token.toLowerCase())) return ''
+  return insertValue.slice(token.length)
+})
 
-  if (parts.length === 1) {
-    if ((commandPart === 'search' || commandPart === 'new') && hasTrailingSpace) {
-      return actionConsoleEntities.value
+onMounted(async () => {
+  loadCommandHistory()
+  try {
+    if (!metadataStore.metadata) {
+      await metadataStore.fetchMetadata()
     }
-    return commands.filter((cmd) => cmd.startsWith(currentToken))
+  } catch (error) {
+    toastStore.error('Failed to load metadata for Action Console')
   }
-
-  if (commandPart === 'search' || commandPart === 'new') {
-    if (parts.length === 2 && !hasTrailingSpace) {
-      return actionConsoleEntities.value.filter((entity) => entity.startsWith(currentToken))
-    }
-    if (parts.length === 2 && hasTrailingSpace && !currentToken) {
-      return actionConsoleEntities.value
-    }
-    return []
-  }
-
-  if (commandPart === 'filter') {
-    return ['not implemented yet'];
-    if (!value.includes(':')) {
-      return [':filtername']
-    }
-    if (currentToken.startsWith(':')) {
-      return [':filtername']
-    }
-  }
-
-  return []
-}
-
-function applyTopSuggestion() {
-  if (!suggestions.value.length) return
-  applySuggestion(suggestions.value[activeSuggestion.value] || suggestions.value[0])
-}
-
-function applySuggestion(suggestion) {
-  input.value = replaceCurrentToken(input.value, suggestion, true)
   updateSuggestions()
+  focusInput()
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(liveSearchTimeout)
+  clearTimeout(liveFilterTimeout)
+})
+
+watch(historyStorageKey, () => loadCommandHistory())
+
+watch(
+    () => historyLines.value.length,
+    () => nextTick(scrollOutputToBottom)
+)
+
+watch(
+    resultItems,
+    (items) => {
+      if (!items.length) {
+        activeResultIndex.value = 0
+        return
+      }
+      activeResultIndex.value = Math.min(activeResultIndex.value, items.length - 1)
+    },
+    { deep: true }
+)
+
+watch(
+    inputValue,
+    (newVal, oldVal) => {
+      updateSuggestions()
+      scheduleLiveQueries()
+      if (resultsPersisted.value && newVal !== persistedResultsCommand.value) {
+        clearResults()
+      }
+    }
+)
+
+function handleInputChange() {
+  historyNavActive.value = false
 }
 
-async function handleEnter() {
-  const command = input.value.trim()
-  if (!command) return
-
-  const searchContext = parseSearchInput(command)
-  if (searchContext && searchResults.value.length === 1) {
-    openSearchResult(searchResults.value[0], { auto: false })
-    return
-  }
-
-  history.value.push({ prefix: '$', text: command })
-  pushHistory(command)
-  await runCommand(command)
-  input.value = ''
-  updateSuggestions()
-  scrollToBottom()
-  showHistoryNav.value = false
-  historyNavIndex.value = null
-}
-
-function handleKeydown(event) {
+function handleKeyDown(event) {
   if (event.key === 'Tab') {
     event.preventDefault()
-    if (searchResults.value.length) {
-      if (searchResults.value.length === 1) {
-        openSearchResult(searchResults.value[0], { auto: false })
+    if (panelMode.value === 'results' && resultItems.value.length) {
+      cycleResult(event.shiftKey ? -1 : 1)
+    } else if (panelMode.value === 'suggestions' && suggestions.value.length) {
+      if (suggestions.value.length === 1) {
+        acceptSuggestion(suggestions.value[0], 0)
       } else {
-        cycleSearchResult(event.shiftKey ? -1 : 1)
+        cycleSuggestion(event.shiftKey ? -1 : 1)
       }
-    } else if (suggestions.value.length === 1) {
-      applyTopSuggestion()
-    } else if (suggestions.value.length) {
-      cycleSuggestion(event.shiftKey ? -1 : 1)
     }
     return
   }
-  if (event.key === ' ' && suggestions.value.length) {
-    event.preventDefault()
-    applyTopSuggestion()
+
+  if (event.key === ' ' || event.key === 'Spacebar') {
+    if (panelMode.value === 'suggestions' && suggestions.value.length) {
+      const suggestion = suggestions.value[activeSuggestionIndex.value]
+      const tokens = tokenize(inputValue.value || '')
+      const firstToken = (tokens[0] || '').toLowerCase()
+      const isCommandOnly =
+          tokens.length === 1 &&
+          COMMANDS.includes(firstToken) &&
+          inputValue.value.trim().toLowerCase() === firstToken
+
+      if (isCommandOnly) {
+        return
+      }
+
+      event.preventDefault()
+      acceptSuggestion(suggestion, activeSuggestionIndex.value)
+      return
+    }
     return
   }
+
+  if (event.key === 'Enter') {
+    if (panelMode.value === 'results' && resultItems.value.length) {
+      event.preventDefault()
+      openResult(resultItems.value[activeResultIndex.value] || resultItems.value[0], activeResultIndex.value)
+      return
+    }
+    event.preventDefault()
+    executeCommand()
+    return
+  }
+
   if (event.key === 'ArrowUp') {
     event.preventDefault()
-    navigateHistory(-1)
+    navigateHistory('up')
     return
   }
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    navigateHistory(1)
+    navigateHistory('down')
     return
   }
-  if (event.key === 'Delete') {
-    if (historyNavIndex.value !== null) {
-      event.preventDefault()
-      deleteHighlightedHistory()
-    }
-    return
-  }
+
   if (event.key === 'Escape') {
     event.preventDefault()
-    clearHistoryNav()
+    resetHistoryNavigation()
+    inputValue.value = ''
+    clearLiveResults()
     return
   }
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    if (searchResults.value.length) {
-      const result = searchResults.value[activeSearchResult.value]
-      if (result) {
-        openSearchResult(result, { auto: false })
-        return
-      }
+
+  if (event.key === 'Delete') {
+    if (historyNavActive.value) {
+      event.preventDefault()
+      deleteHistoryEntry()
     }
-    handleEnter()
   }
 }
 
-function cycleSuggestion(direction) {
+function updateSuggestions() {
+  const input = inputValue.value || ''
+  const tokens = tokenize(input)
+  const commandToken = (tokens[0] || '').toLowerCase()
+  const entityToken = tokens[1] || ''
+  const fieldToken = tokens[2] || ''
+  const operatorToken = tokens[3] || ''
+  const usingStoredFilter = commandToken === 'filter' && fieldToken.startsWith('?')
+
+  let list = []
+
+  if (!commandToken || (!COMMANDS.includes(commandToken) && tokens.length === 1)) {
+    list = filterByPrefix(COMMANDS, getCurrentToken()).map(value => ({
+      value,
+      label: value,
+      type: 'command'
+    }))
+  } else if (commandToken === 'new') {
+    if (!entityToken) {
+      list = buildEntitySuggestions(entityToken)
+    } else {
+      list = []
+    }
+  } else if (commandToken === 'search') {
+    if (tokens.length <= 2) {
+      list = buildEntitySuggestions(entityToken)
+    }
+  } else if (commandToken === 'filter') {
+    if (tokens.length <= 2) {
+      list = buildEntitySuggestions(entityToken)
+    } else if (usingStoredFilter) {
+      if (tokens.length <= 3) {
+        list = buildStoredFilterSuggestions(entityToken, fieldToken)
+      }
+    } else {
+      if (tokens.length === 3) {
+        list = buildFieldSuggestions(entityToken, fieldToken)
+      } else if (tokens.length === 4) {
+        list = buildOperatorSuggestions(operatorToken)
+      }
+    }
+  }
+
+  suggestions.value = list
+  activeSuggestionIndex.value = 0
+}
+
+function buildEntitySuggestions(token) {
+  const lower = (token || '').toLowerCase()
+  return availableEntities.value
+      .filter(entity => !lower || entity.name.toLowerCase().startsWith(lower))
+      .map(entity => ({
+        value: entity.name,
+        label: entity.name,
+        type: 'entity'
+      }))
+}
+
+function buildFieldSuggestions(entityName, token) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName) || {}
+  const fields = Object.keys(entityMeta.fields || {})
+  return filterByPrefix(fields, token).map(field => ({
+    value: field,
+    label: formatFieldName(field),
+    subLabel: 'field',
+    type: 'field'
+  }))
+}
+
+function buildOperatorSuggestions(token) {
+  return filterByPrefix(OPERATORS, token).map(op => ({
+    value: op,
+    label: op,
+    subLabel: 'operator',
+    type: 'operator'
+  }))
+}
+
+function buildStoredFilterSuggestions(entityName, token) {
+  const filters = ensureStoredFilters(entityName)
+  const needle = (token || '?').replace('?', '').toLowerCase()
+  return filters
+      .filter(filter => !needle || filter.name.toLowerCase().startsWith(needle))
+      .map(filter => ({
+        value: filter.name,
+        insertValue: `?${filter.name}`,
+        label: filter.name,
+        subLabel: 'stored filter',
+        type: 'stored-filter'
+      }))
+}
+
+function acceptSuggestion(suggestion, index) {
+  if (!suggestion) return
+  activeSuggestionIndex.value = index
+  const insertValue = suggestion.insertValue || suggestion.value
+  const current = inputValue.value || ''
+  const endsWithSpace = current.endsWith(' ')
+  const lastSpace = current.lastIndexOf(' ')
+  let nextInput = ''
+
+  if (endsWithSpace) {
+    nextInput = `${current}${insertValue} `
+  } else if (lastSpace === -1) {
+    nextInput = `${insertValue} `
+  } else {
+    nextInput = `${current.slice(0, lastSpace + 1)}${insertValue} `
+  }
+
+  inputValue.value = nextInput
+  focusInput()
+}
+
+function cycleSuggestion(delta) {
   if (!suggestions.value.length) return
   const total = suggestions.value.length
-  const nextIndex = (activeSuggestion.value + direction + total) % total
-  activeSuggestion.value = nextIndex
+  activeSuggestionIndex.value = (activeSuggestionIndex.value + delta + total) % total
 }
 
-function replaceCurrentToken(value, suggestion, addSpace) {
-  const endsWithSpace = value.endsWith(' ')
-  if (endsWithSpace) {
-    return `${value}${suggestion}${addSpace ? ' ' : ''}`
-  }
-
-  const lastSpace = value.lastIndexOf(' ')
-  if (lastSpace === -1) {
-    return `${suggestion}${addSpace ? ' ' : ''}`
-  }
-
-  const before = value.slice(0, lastSpace + 1)
-  return `${before}${suggestion}${addSpace ? ' ' : ''}`
-}
-
-async function runCommand(command) {
-  if (command === 'clear') {
-    history.value = []
-    return
-  }
-
-  if (command === 'help') {
-    history.value.push({ prefix: '>', text: 'search [entity] query - Find records. Results appear below as you type.'})
-    history.value.push({ prefix: '>', text: 'new [entity] - Open a create window for the entity.' })
-    history.value.push({ prefix: '>', text: 'filter [filter name] - Not available yet.' })
-    history.value.push({ prefix: '>', text: 'help - Show this help.' })
-    history.value.push({ prefix: '>', text: 'clear - Clear the console output.' })
-    return
-  }
-
-  if (command.startsWith('search ')) {
-    await runSearchCommand(command)
-    return
-  }
-
-  if (command.startsWith('new ')) {
-    await runNewCommand(command)
-    return
-  }
-
-  if (command.startsWith('filter ')) {
-    history.value.push({ prefix: '>', text: 'Filters are not available yet.' })
-    return
-  }
-
-  history.value.push({ prefix: '>', text: `Unknown command: ${command}` })
-}
-
-function isEntityAllowed(entityName) {
-  const entityMeta = metadataStore.entities?.[entityName]
-  if (!entityMeta) return false
-  const capability = entityMeta?.capabilities?.['action-console'] || null
-  const activeValue = capability?.active
-  const requiresAdminValue = capability?.requires_admin
-  const isActive =
-    activeValue === undefined ||
-    activeValue === null ||
-    activeValue === true ||
-    activeValue === 'true'
-  const requiresAdmin =
-    requiresAdminValue === true || requiresAdminValue === 'true'
-  if (!isActive) return false
-  if (requiresAdmin && !authStore.isAdmin) return false
-  return true
-}
-
-function getRecordDisplayName(entityName, record) {
-  if (!record) return null
-  const entityMeta = metadataStore.getEntityMetadata(entityName)
-  const isPerson = entityMeta?.person === true
-  if (isPerson && record.first_name && record.last_name) {
-    return `${record.first_name} ${record.last_name}`.trim()
-  }
-  if (record.name) {
-    return record.name
-  }
-  return null
-}
-
-function parseSearchCommand(command) {
-  const match = command.match(/^search\s+(\S+)\s*(.*)$/i)
-  if (!match) return null
-  return {
-    entityName: match[1],
-    query: (match[2] || '').trim()
-  }
-}
-
-async function runSearchCommand(command) {
-  await ensureMetadataLoaded()
-  const parsed = parseSearchCommand(command)
-  if (!parsed) {
-    history.value.push({ prefix: '>', text: 'Usage: search [entity] query' })
-    return
-  }
-
-  const { entityName, query } = parsed
-  if (!query) {
-    history.value.push({ prefix: '>', text: 'Search requires a query value.' })
-    return
-  }
-
-  if (!isEntityAllowed(entityName)) {
-    history.value.push({
-      prefix: '>',
-      text: `Entity "${entityName}" is not available in the action console.`
-    })
-    return
-  }
-
-  history.value.push({
-    prefix: '>',
-    text: `Searching ${entityName} for "${query}"...`
-  })
-
-  try {
-    const response = await entityService.getList(entityName, {
-      page: 1,
-      limit: LIST_LIMIT,
-      search: query
-    })
-    const records = response?.records || []
-    if (!records.length) {
-      history.value.push({
-        prefix: '>',
-        text: `No ${entityName} records found for "${query}".`
-      })
-      return
-    }
-
-    if (records.length === 1) {
-      const record = records[0]
-      if (record?.id) {
-        const recordName = getRecordDisplayName(entityName, record)
-        openRecordWindow(entityName, record.id, 'detail', recordName)
-        return
-      }
-    }
-
-    history.value.push({
-      prefix: '>',
-      text: `Found ${records.length} ${entityName} records. Refine your search to open a single result.`
-    })
-    records.slice(0, 5).forEach((record) => {
-      const recordName = getRecordDisplayName(entityName, record)
-      const label = recordName ? `${recordName} (${record.id})` : record.id
-      history.value.push({ prefix: '>', text: `- ${label}` })
-    })
-  } catch (err) {
-    history.value.push({
-      prefix: '>',
-      text: `Search failed for ${entityName}.`
-    })
-  }
-}
-
-async function runNewCommand(command) {
-  await ensureMetadataLoaded()
-  const match = command.match(/^new\s+(\S+)$/i)
-  if (!match) {
-    history.value.push({ prefix: '>', text: 'Usage: new [entity]' })
-    return
-  }
-
-  const entityName = match[1]
-  if (!isEntityAllowed(entityName)) {
-    history.value.push({
-      prefix: '>',
-      text: `Entity "${entityName}" is not available in the action console.`
-    })
-    return
-  }
-
-  openRecordWindow(entityName, null, 'create')
-}
-
-function parseSearchInput(value) {
-  const trimmed = value.trimStart()
-  const match = trimmed.match(/^search\s+(\S+)\s*(.*)$/i)
-  if (!match) return null
-  return {
-    entityName: match[1],
-    query: (match[2] || '').trim()
-  }
-}
-
-function scheduleSearch(value) {
-  if (searchTimeout) {
-    clearTimeout(searchTimeout)
-    searchTimeout = null
-  }
-
-  const parsed = parseSearchInput(value)
-  if (!parsed || !parsed.query) {
-    resetSearchResults()
-    return
-  }
-
-  const { entityName, query } = parsed
-  if (!isEntityAllowed(entityName)) {
-    resetSearchResults()
-    return
-  }
-
-  const searchKey = `${entityName}::${query}`
-  latestSearchKey = searchKey
-  searchTimeout = setTimeout(() => {
-    runLiveSearch(entityName, query, searchKey)
-  }, 200)
-}
-
-function resetSearchResults() {
-  searchResults.value = []
-  activeSearchResult.value = 0
-  searchLoading.value = false
-}
-
-async function runLiveSearch(entityName, query, searchKey) {
-  searchLoading.value = true
-  try {
-    const response = await entityService.getList(entityName, {
-      page: 1,
-      limit: LIST_LIMIT,
-      search: query
-    })
-    if (latestSearchKey !== searchKey) return
-    const records = response?.records || []
-    searchResults.value = records.map((record) => {
-      const recordName = getRecordDisplayName(entityName, record)
-      const label = recordName ? `${recordName} (${record.id})` : record.id
-      return {
-        id: record.id,
-        name: recordName,
-        label,
-        entityName,
-        record
-      }
-    })
-    activeSearchResult.value = 0
-    maybeAutoOpenSingleResult(searchKey)
-  } catch (err) {
-    if (latestSearchKey !== searchKey) return
-    searchResults.value = []
-  } finally {
-    if (latestSearchKey === searchKey) {
-      searchLoading.value = false
-    }
-  }
-}
-
-function maybeAutoOpenSingleResult(searchKey) {
-  if (searchResults.value.length !== 1) return
-  const result = searchResults.value[0]
-  if (!result?.id) return
-  const openKey = `${searchKey}::${result.id}`
-  if (openKey === lastAutoOpenedKey.value) return
-  lastAutoOpenedKey.value = openKey
-  openSearchResult(result, { auto: true })
-}
-
-function cycleSearchResult(direction) {
-  const total = searchResults.value.length
-  if (!total) return
-  const nextIndex = (activeSearchResult.value + direction + total) % total
-  activeSearchResult.value = nextIndex
-}
-
-function openSearchResult(result, { auto }) {
-  if (!result?.id) return
-  const recordName = result.name
-  openRecordWindow(result.entityName, result.id, 'detail', recordName)
-  if (auto) {
-    scrollToBottom()
-  }
-}
-
-const ghostSuffix = computed(() => {
-  if (!input.value) return ''
-  if (showHistoryNav.value) return ''
-  if (!suggestions.value.length) return ''
-  if (searchResults.value.length) return ''
-  const suggestion = suggestions.value[activeSuggestion.value] || ''
-  if (!suggestion) return ''
-  return getGhostSuffix(input.value, suggestion)
-})
-
-function getGhostSuffix(value, suggestion) {
-  const endsWithSpace = value.endsWith(' ')
-  if (endsWithSpace) {
-    return `${suggestion} `
-  }
-  const lastSpace = value.lastIndexOf(' ')
-  const currentToken = lastSpace === -1 ? value : value.slice(lastSpace + 1)
-  if (!suggestion.startsWith(currentToken)) return ''
-  return `${suggestion.slice(currentToken.length)} `
+function cycleResult(delta) {
+  if (!resultItems.value.length) return
+  const total = resultItems.value.length
+  activeResultIndex.value = (activeResultIndex.value + delta + total) % total
 }
 
 function navigateHistory(direction) {
-  const commandsHistory = getHistoryCommands()
-  if (!commandsHistory.length) return
-
-  if (historyNavIndex.value === null) {
-    if (direction > 0) {
-      return
-    }
-    historyNavIndex.value = commandsHistory.length - 1
+  if (!commandHistory.value.length) return
+  if (!historyNavActive.value) {
+    historyNavActive.value = true
+    historyNavIndex.value = direction === 'up' ? commandHistory.value.length - 1 : 0
   } else {
-    const nextIndex = historyNavIndex.value + direction
-    if (nextIndex >= commandsHistory.length) {
-      historyNavIndex.value = null
-      input.value = ''
-      showHistoryNav.value = false
-      updateSuggestions()
+    const delta = direction === 'up' ? -1 : 1
+    const nextIndex = historyNavIndex.value + delta
+    if (nextIndex < 0 || nextIndex >= commandHistory.value.length) {
+      historyNavActive.value = false
+      historyNavIndex.value = -1
+      inputValue.value = ''
       return
     }
-    historyNavIndex.value = Math.max(nextIndex, 0)
+    historyNavIndex.value = nextIndex
   }
-
-  const entry = commandsHistory[historyNavIndex.value] || ''
-  input.value = entry
-  showHistoryNav.value = true
-  updateSuggestions()
+  inputValue.value = commandHistory.value[historyNavIndex.value] || ''
 }
 
-const historyWindow = computed(() => {
-  const commandsHistory = getHistoryCommands()
-  if (!commandsHistory.length || historyNavIndex.value === null) return []
-  const index = historyNavIndex.value
-  return [
-    commandsHistory[index - 1] || '',
-    commandsHistory[index] || '',
-    commandsHistory[index + 1] || ''
-  ]
-})
+function deleteHistoryEntry() {
+  if (!historyNavActive.value || historyNavIndex.value < 0) return
+  commandHistory.value.splice(historyNavIndex.value, 1)
+  persistCommandHistory()
+  if (!commandHistory.value.length) {
+    resetHistoryNavigation()
+    inputValue.value = ''
+    return
+  }
+  historyNavIndex.value = Math.min(historyNavIndex.value, commandHistory.value.length - 1)
+  inputValue.value = commandHistory.value[historyNavIndex.value] || ''
+}
 
-function deleteHighlightedHistory() {
-  const store = loadHistoryStore()
-  const userId = getUserId()
-  const commandsHistory = Array.isArray(store[userId]) ? store[userId] : []
-  if (historyNavIndex.value === null || !commandsHistory.length) {
-    clearHistoryNav()
+function resetHistoryNavigation() {
+  historyNavActive.value = false
+  historyNavIndex.value = -1
+}
+
+function executeCommand() {
+  const rawInput = inputValue.value
+  const trimmed = rawInput.trim()
+  if (!trimmed) return
+
+  addHistoryLine('$', rawInput)
+  addCommandToHistory(trimmed)
+  resetHistoryNavigation()
+
+  const tokens = trimmed.split(' ')
+  const command = (tokens[0] || '').toLowerCase()
+
+  if (command === 'help') {
+    printHelp()
+    inputValue.value = ''
     return
   }
 
-  commandsHistory.splice(historyNavIndex.value, 1)
-  store[userId] = commandsHistory
-  saveHistoryStore(store)
-  clearHistoryNav()
+  if (command === 'clear') {
+    historyLines.value = []
+    clearResults()
+    inputValue.value = ''
+    return
+  }
+
+  if (command === 'new') {
+    const entityName = tokens[1]
+    if (!entityName) {
+      addHistoryLine('>', 'Missing entity name')
+      return
+    }
+    if (!isEntityAllowed(entityName)) {
+      addHistoryLine('>', `${formatEntityName(entityName)} is not available`)
+      return
+    }
+    openRecordWindow(entityName, null, 'create')
+    addHistoryLine('>', `Opened create window for ${formatEntityName(entityName)}`)
+    inputValue.value = ''
+    return
+  }
+
+  if (command === 'search') {
+    const entityName = tokens[1]
+    const query = tokens.slice(2).join(' ').trim()
+    if (!entityName) {
+      addHistoryLine('>', 'Missing entity name')
+      return
+    }
+    if (!isEntityAllowed(entityName)) {
+      addHistoryLine('>', `${formatEntityName(entityName)} is not available`)
+      return
+    }
+    if (!query) {
+      addHistoryLine('>', 'Search query cannot be empty')
+      return
+    }
+    runSearchCommand(entityName, query)
+    return
+  }
+
+  if (command === 'filter') {
+    const entityName = tokens[1]
+    if (!entityName) {
+      addHistoryLine('>', 'Missing entity name')
+      return
+    }
+    if (!isEntityAllowed(entityName)) {
+      addHistoryLine('>', `${formatEntityName(entityName)} is not available`)
+      return
+    }
+
+    const remainder = tokens.slice(2)
+    if (!remainder.length) {
+      addHistoryLine('>', 'Filter requires a field/operator/value or stored filter')
+      return
+    }
+
+    if (remainder[0].startsWith('?')) {
+      const filterName = remainder.join(' ').replace(/^\?/, '')
+      const filterDef = getStoredFilterByName(entityName, filterName)
+      if (!filterDef) {
+        addHistoryLine('>', `Stored filter "${filterName}" not found`)
+        return
+      }
+      runStoredFilterCommand(entityName, filterDef)
+      return
+    }
+
+    const field = remainder[0]
+    const operator = remainder[1]
+    const value = remainder.slice(2).join(' ')
+
+    if (!field || !operator) {
+      addHistoryLine('>', 'Filter requires field, operator, and value')
+      return
+    }
+    if (!OPERATORS.includes(operator)) {
+      addHistoryLine('>', `Operator must be one of: ${OPERATORS.join(', ')}`)
+      return
+    }
+    if (!value && operator !== 'not_empty') {
+      addHistoryLine('>', 'Filter value cannot be empty (except for not_empty)')
+      return
+    }
+
+    runAdhocFilterCommand(entityName, field, operator, value || null)
+    return
+  }
+
+  addHistoryLine('>', 'Unknown command. Type "help" to see options.')
+  inputValue.value = ''
 }
 
-function clearHistoryNav() {
-  historyNavIndex.value = null
-  showHistoryNav.value = false
-  input.value = ''
-  updateSuggestions()
-}
-
-function getHistoryKey() {
-  return 'action_console_history'
-}
-
-function getUserId() {
-  return authStore.username || 'anonymous'
-}
-
-function loadHistoryStore() {
-  const key = getHistoryKey()
-  const raw = localStorage.getItem(key)
-  if (!raw) return {}
+async function runSearchCommand(entityName, query) {
+  addHistoryLine('>', `Searching ${formatEntityName(entityName)}...`)
   try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
+    const response = await entityService.getList(entityName, {
+      page: 1,
+      limit: listLimit.value,
+      search: query
+    })
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    applyResultState(items, 'command-search')
+
+    const total = response?.total ?? items.length
+    addHistoryLine('>', `Found ${total} record${total === 1 ? '' : 's'}`)
+    if (items.length === 0) {
+      addHistoryLine('>', 'No records found')
+    } else {
+      addHistoryLine('>', previewLabels(items))
+    }
+  } catch (error) {
+    addHistoryLine('>', 'Search failed')
+    clearResults()
+  } finally {
+    persistedResultsCommand.value = ''
+    inputValue.value = ''
   }
 }
 
-function saveHistoryStore(store) {
-  const key = getHistoryKey()
-  localStorage.setItem(key, JSON.stringify(store))
+async function runStoredFilterCommand(entityName, filterDef) {
+  addHistoryLine('>', 'Running stored filter...')
+  try {
+    const response = await entityService.filter(entityName, {
+      filter_id: filterDef.id,
+      limit: listLimit.value,
+      page: 1
+    })
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    applyResultState(items, 'command-filter')
+
+    const total = response?.total ?? items.length
+    addHistoryLine('>', `Found ${total} record${total === 1 ? '' : 's'}`)
+    if (items.length === 0) {
+      addHistoryLine('>', 'No records found')
+    } else {
+      addHistoryLine('>', previewLabels(items))
+    }
+  } catch (error) {
+    addHistoryLine('>', 'Filter failed')
+    clearResults()
+  } finally {
+    persistedResultsCommand.value = ''
+    inputValue.value = ''
+  }
 }
 
-function getHistoryCommands() {
-  const store = loadHistoryStore()
-  const userId = getUserId()
-  const entries = Array.isArray(store[userId]) ? store[userId] : []
-  return entries.map((entry) => entry.command || '')
+async function runAdhocFilterCommand(entityName, field, operator, value) {
+  addHistoryLine('>', 'Running filter...')
+  const payload = {
+    filters: [
+      { field, operator, value }
+    ],
+    limit: listLimit.value,
+    page: 1
+  }
+  try {
+    const response = await entityService.filter(entityName, payload)
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    applyResultState(items, 'command-filter')
+
+    const total = response?.total ?? items.length
+    addHistoryLine('>', `Found ${total} record${total === 1 ? '' : 's'}`)
+    if (items.length === 0) {
+      addHistoryLine('>', 'No records found')
+    } else {
+      addHistoryLine('>', previewLabels(items))
+    }
+  } catch (error) {
+    addHistoryLine('>', 'Filter failed')
+    clearResults()
+  } finally {
+    persistedResultsCommand.value = ''
+    inputValue.value = ''
+  }
 }
 
-function pushHistory(command) {
-  const store = loadHistoryStore()
-  const userId = getUserId()
-  const historyList = Array.isArray(store[userId]) ? store[userId] : []
-  historyList.push({ command, date: new Date().toISOString() })
-  store[userId] = historyList.slice(-100)
-  saveHistoryStore(store)
+function applyResultState(items, source) {
+  resultItems.value = items
+  resultsSource.value = source
+  resultsPersisted.value = source.startsWith('command')
+  activeResultIndex.value = 0
+  resultStatusMessage.value = items.length ? '' : 'No records found'
 }
 
-function scrollToBottom() {
+function clearResults() {
+  resultItems.value = []
+  resultsSource.value = null
+  resultsPersisted.value = false
+  resultStatusMessage.value = ''
+  activeResultIndex.value = 0
+}
+
+function clearLiveResults() {
+  if (resultsSource.value && resultsSource.value.startsWith('live')) {
+    clearResults()
+  }
+}
+
+function scheduleLiveQueries() {
+  clearTimeout(liveSearchTimeout)
+  clearTimeout(liveFilterTimeout)
+
+  const input = inputValue.value || ''
+  const tokens = tokenize(input)
+  const command = (tokens[0] || '').toLowerCase()
+
+  if (command === 'search') {
+    const entityName = tokens[1]
+    const query = tokens.slice(2).join(' ').trim()
+    if (entityName && query && isEntityAllowed(entityName)) {
+      liveSearchTimeout = setTimeout(() => runLiveSearch(entityName, query), LIVE_SEARCH_DEBOUNCE)
+    } else if (resultsSource.value === 'live-search') {
+      clearResults()
+    }
+    return
+  }
+
+  if (command === 'filter') {
+    const entityName = tokens[1]
+    if (!entityName || !isEntityAllowed(entityName)) {
+      if (resultsSource.value === 'live-filter') clearResults()
+      return
+    }
+
+    const fieldToken = tokens[2] || ''
+    const operatorToken = tokens[3] || ''
+
+    if (fieldToken.startsWith('?')) {
+      const filterDef = getStoredFilterByName(entityName, fieldToken.replace('?', ''))
+      if (filterDef) {
+        liveFilterTimeout = setTimeout(
+            () => runLiveStoredFilter(entityName, filterDef),
+            LIVE_FILTER_DEBOUNCE
+        )
+      } else if (resultsSource.value === 'live-filter') {
+        clearResults()
+      }
+      return
+    }
+
+    const valueToken = tokens.slice(4).join(' ')
+    const hasValue = valueToken || operatorToken === 'not_empty'
+
+    if (fieldToken && operatorToken && OPERATORS.includes(operatorToken) && hasValue) {
+      const payload = {
+        filters: [
+          { field: fieldToken, operator: operatorToken, value: valueToken || null }
+        ],
+        limit: listLimit.value,
+        page: 1
+      }
+      liveFilterTimeout = setTimeout(
+          () => runLiveAdhocFilter(entityName, payload),
+          LIVE_FILTER_DEBOUNCE
+      )
+    } else if (resultsSource.value === 'live-filter') {
+      clearResults()
+    }
+    return
+  }
+
+  clearLiveResults()
+}
+
+async function runLiveSearch(entityName, query) {
+  liveSearchRequestId += 1
+  const requestId = liveSearchRequestId
+  try {
+    const response = await entityService.getList(entityName, {
+      page: 1,
+      limit: listLimit.value,
+      search: query
+    })
+    if (requestId !== liveSearchRequestId) return
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    resultItems.value = items
+    resultsSource.value = 'live-search'
+    resultsPersisted.value = false
+    activeResultIndex.value = 0
+    resultStatusMessage.value = items.length ? '' : 'No records found'
+  } catch (error) {
+    if (requestId !== liveSearchRequestId) return
+    clearResults()
+  }
+}
+
+async function runLiveStoredFilter(entityName, filterDef) {
+  liveFilterRequestId += 1
+  const requestId = liveFilterRequestId
+  try {
+    const response = await entityService.filter(entityName, {
+      filter_id: filterDef.id,
+      limit: listLimit.value,
+      page: 1
+    })
+    if (requestId !== liveFilterRequestId) return
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    resultItems.value = items
+    resultsSource.value = 'live-filter'
+    resultsPersisted.value = false
+    activeResultIndex.value = 0
+    resultStatusMessage.value = items.length ? '' : 'No records found'
+  } catch (error) {
+    if (requestId !== liveFilterRequestId) return
+    clearResults()
+  }
+}
+
+async function runLiveAdhocFilter(entityName, payload) {
+  liveFilterRequestId += 1
+  const requestId = liveFilterRequestId
+  try {
+    const response = await entityService.filter(entityName, payload)
+    if (requestId !== liveFilterRequestId) return
+    const records = extractRecords(response)
+    const items = mapRecordsToResults(entityName, records)
+    resultItems.value = items
+    resultsSource.value = 'live-filter'
+    resultsPersisted.value = false
+    activeResultIndex.value = 0
+    resultStatusMessage.value = items.length ? '' : 'No records found'
+  } catch (error) {
+    if (requestId !== liveFilterRequestId) return
+    clearResults()
+  }
+}
+
+function openResult(result, index) {
+  if (!result) return
+  activeResultIndex.value = index
+  openRecordWindow(result.entityName, result.id, 'detail', result.name)
+  addHistoryLine('>', `Opened ${result.label}`)
+  focusInput()
+}
+
+function addHistoryLine(prefix, text) {
+  historyLines.value.push({ prefix, text })
+}
+
+function addCommandToHistory(command) {
+  commandHistory.value.push(command)
+  if (commandHistory.value.length > 100) {
+    commandHistory.value = commandHistory.value.slice(-100)
+  }
+  persistCommandHistory()
+}
+
+function persistCommandHistory() {
+  try {
+    localStorage.setItem(historyStorageKey.value, JSON.stringify(commandHistory.value))
+  } catch (error) {
+    // Ignore persistence errors
+  }
+}
+
+function loadCommandHistory() {
+  try {
+    const raw = localStorage.getItem(historyStorageKey.value)
+    if (raw) {
+      commandHistory.value = JSON.parse(raw) || []
+    } else {
+      commandHistory.value = []
+    }
+  } catch (error) {
+    commandHistory.value = []
+  }
+}
+
+function printHelp() {
+  addHistoryLine('>', 'Available commands:')
+  addHistoryLine('>', 'search [entity] [query]')
+  addHistoryLine('>', 'filter [entity] [field operator value]')
+  addHistoryLine('>', 'filter [entity] ?[stored filter name]')
+  addHistoryLine('>', 'new [entity]')
+  addHistoryLine('>', 'help')
+  addHistoryLine('>', 'clear')
+}
+
+function ensureStoredFilters(entityName) {
+  if (!entityName) return []
+  if (!storedFilters.value[entityName]) {
+    storedFilters.value = {
+      ...storedFilters.value,
+      [entityName]: [
+        { id: 1, name: `Mock filter #1 (${formatEntityName(entityName)})` }
+      ]
+    }
+  }
+  return storedFilters.value[entityName]
+}
+
+function getStoredFilterByName(entityName, name) {
+  const filters = ensureStoredFilters(entityName)
+  const lower = (name || '').toLowerCase()
+  return filters.find(filter => filter.name.toLowerCase() === lower) || null
+}
+
+function extractRecords(response) {
+  if (!response) return []
+  if (Array.isArray(response)) return response
+  if (Array.isArray(response.records)) return response.records
+  if (Array.isArray(response.data)) return response.data
+  if (Array.isArray(response.list)) return response.list
+  return []
+}
+
+function mapRecordsToResults(entityName, records) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName) || {}
+  return (records || []).map(record => {
+    const name = buildRecordName(record, entityMeta)
+    const label = name ? `${name} (${record.id})` : String(record.id)
+    return {
+      id: record.id,
+      name,
+      label,
+      entityName,
+      record
+    }
+  })
+}
+
+function buildRecordName(record, entityMeta) {
+  const isPerson = toBoolean(entityMeta?.person)
+  if (isPerson && record?.first_name && record?.last_name) {
+    return `${record.first_name} ${record.last_name}`.trim()
+  }
+  if (record?.name) return record.name
+  return record?.id ?? null
+}
+
+function previewLabels(items) {
+  const preview = items.slice(0, RESULT_PREVIEW_LIMIT).map(item => item.label)
+  return preview.join(' | ')
+}
+
+function isLiveQuery(input) {
+  const tokens = tokenize(input)
+  const command = (tokens[0] || '').toLowerCase()
+  if (command === 'search') {
+    return tokens[1] && tokens.slice(2).join(' ').trim()
+  }
+  if (command === 'filter') {
+    const fieldToken = tokens[2] || ''
+    if (fieldToken.startsWith('?')) {
+      return true
+    }
+    return tokens.length >= 4
+  }
+  return false
+}
+
+function scrollOutputToBottom() {
   nextTick(() => {
     if (!outputRef.value) return
     outputRef.value.scrollTop = outputRef.value.scrollHeight
   })
 }
 
-onMounted(() => {
-  ensureMetadataLoaded()
-  updateSuggestions()
-})
+function focusInput() {
+  nextTick(() => {
+    inputRef.value?.focus()
+  })
+}
+
+function tokenize(value) {
+  if (value === '') return ['']
+  return value.split(' ')
+}
+
+function getCurrentToken() {
+  const tokens = tokenize(inputValue.value || '')
+  return tokens[tokens.length - 1] || ''
+}
+
+function filterByPrefix(list, token) {
+  const lower = (token || '').toLowerCase()
+  return list.filter(item => !lower || item.toLowerCase().startsWith(lower))
+}
+
+function formatEntityName(name) {
+  return metadataStore.formatEntityName(name)
+}
+
+function formatFieldName(field) {
+  return field
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+}
+
+function toBoolean(value) {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+function isEntityAllowed(entityName) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName)
+  if (!entityMeta) return false
+
+  const capability = entityMeta.capabilities?.['action-console']
+  let active = true
+  let requiresAdmin = false
+
+  if (capability !== undefined) {
+    if (typeof capability === 'boolean' || typeof capability === 'string') {
+      active = toBoolean(capability)
+    } else if (typeof capability === 'object') {
+      if (capability.active !== undefined) {
+        active = toBoolean(capability.active)
+      }
+      if (capability.requires_admin !== undefined) {
+        requiresAdmin = toBoolean(capability.requires_admin)
+      }
+    }
+  }
+
+  if (requiresAdmin && !authStore.isAdmin) return false
+  return active
+}
 </script>
 
 <style scoped>
 .action-console {
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.85rem;
-  height: 100%;
+  background: radial-gradient(circle at 20% 20%, #111827, #0b1223 65%);
+  color: #e2e8f0;
+  border-radius: 10px;
+  border: 1px solid #1f2937;
+  overflow: hidden;
+  font-family: "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 .console-output {
-  background: #0f1216;
-  color: #e5e7eb;
-  border-radius: 0.4rem;
-  padding: 0.5rem;
-  height: 100%;
-  min-height: 120px;
+  padding: 0.75rem 1rem 1rem;
   overflow-y: auto;
 }
 
 .console-line {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.5rem;
   line-height: 1.4;
-}
-
-.console-active {
-  margin-top: 0.4rem;
+  font-size: 0.95rem;
 }
 
 .console-prefix {
-  color: #94a3b8;
+  flex-shrink: 0;
+  width: 1rem;
+  text-align: right;
+  opacity: 0.85;
 }
 
-.console-input-field {
+.prefix-user {
+  color: #38bdf8;
+}
+
+.prefix-system {
+  color: #a5b4fc;
+}
+
+.console-text {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.console-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem 0.5rem 0.9rem;
+  border-top: 1px solid #1e293b;
+  position: relative;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.input-prefix {
+  color: #38bdf8;
+}
+
+.input-shell {
+  position: relative;
+  flex: 1;
+}
+
+.console-input {
+  width: 100%;
   background: transparent;
   border: none;
-  color: inherit;
-  flex: 1;
-  min-width: 120px;
+  color: #e2e8f0;
   outline: none;
-  font-family: inherit;
-  position: relative;
+  font: inherit;
+  padding: 0.2rem 0;
   z-index: 2;
-  width: 100%;
-}
-
-.console-input-wrapper {
   position: relative;
-  flex: 1;
-  min-width: 120px;
 }
 
-.console-ghost {
+.console-input::placeholder {
+  color: #475569;
+}
+
+.ghost-layer {
   position: absolute;
-  top: 0;
-  left: 0;
-  color: rgba(148, 163, 184, 0.5);
-  white-space: pre;
+  inset: 0;
+  color: #64748b;
   pointer-events: none;
-  font-family: inherit;
   z-index: 1;
+  overflow: hidden;
+  white-space: pre;
+  font: inherit;
+  padding: 0.2rem 0;
 }
 
-.console-ghost-prefix {
+.ghost-base {
   color: transparent;
 }
 
-.console-ghost-suffix {
-  color: rgba(148, 163, 184, 0.5);
+.ghost-suffix {
+  color: #475569;
 }
 
-.console-suggestions {
+.console-panel {
+  padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+  border-top: 1px solid #1e293b;
+  background: rgba(12, 19, 34, 0.95);
+}
+
+.panel-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+.chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-top: 0.3rem;
-  padding: 0.2rem 0.3rem;
-  border-radius: 0;
-  background: rgba(15, 18, 22, 0.5);
 }
 
-.console-suggestion {
-  border: 1px solid rgba(226, 232, 240, 0.35);
-  background: transparent;
+.chip {
+  border: 1px solid #334155;
+  background: #0f172a;
   color: #e2e8f0;
-  border-radius: 0;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.75rem;
+  border-radius: 4px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 
-.console-suggestion.active,
-.console-suggestion:hover {
-  background: rgba(148, 163, 184, 0.2);
+.chip:hover {
+  border-color: #cbd5e1;
 }
 
-.console-search-loading {
-  border-style: dashed;
-  color: rgba(226, 232, 240, 0.7);
+.chip.active {
+  border-color: #e2e8f0;
+  background: #111827;
 }
 
-.console-history .history-entry {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: transparent;
-  color: #cbd5f5;
+.panel-empty {
+  color: #94a3b8;
+  font-size: 0.9rem;
+  padding: 0.25rem 0.1rem 0;
 }
 
-.console-history .history-entry.active {
-  background: rgba(148, 163, 184, 0.25);
-  color: #e2e8f0;
+.preview-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+  color: #cbd5e1;
+}
+
+.preview-line.active {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.preview-role {
+  width: 0.7rem;
+  color: #38bdf8;
+}
+
+@media (max-width: 768px) {
+  .chip-row {
+    max-height: 140px;
+    overflow-y: auto;
+  }
 }
 </style>

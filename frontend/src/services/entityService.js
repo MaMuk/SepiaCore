@@ -11,7 +11,8 @@ export class EntityService {
       limit = getListLimit(),
       search = null,
       sort = 'date_modified',
-      order = 'DESC'
+      order = 'DESC',
+      filters = null
     } = options
 
     const params = new URLSearchParams({
@@ -23,6 +24,9 @@ export class EntityService {
 
     if (search) {
       params.append('search', search)
+    }
+    if (filters) {
+      params.append('filters', filters)
     }
 
     try {
@@ -56,7 +60,18 @@ export class EntityService {
       throw error
     }
   }
+
+  /**
+   * Filter entity records
+   */
+  async filter(entityName, payload = {}) {
+    try {
+      const response = await api.post(`/${entityName}/filter`, payload)
+      return response.data
+    } catch (error) {
+      throw error
+    }
+  }
 }
 
 export default new EntityService()
-

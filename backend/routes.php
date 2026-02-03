@@ -310,6 +310,12 @@ Flight::route('GET /@model/count', function($model) {
     $controller->count($model);
 });
 
+// Filter route
+Flight::route('POST /@model/filter', function($model) {
+    $controller = new EntityController();
+    $controller->filter($model);
+});
+
 // Generic entity routes (must be last to avoid conflicts)
 Flight::route('GET /@model(/@id(/@action))', function($model, $id = null, $action = null) {
     $controller = new EntityController();
