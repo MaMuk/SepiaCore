@@ -287,7 +287,7 @@ const relationshipEditorFilterEntity = ref(null)
 
 // Protected entities that cannot be deleted or have fields removed
 // TODO: Block delete and field removal functions in UI for protected entities (backend will also enforce this)
-const PROTECTED_ENTITIES = ['users', 'tokens', 'rawendpointdata', 'modulebuilder', 'endpoints']
+const PROTECTED_ENTITIES = ['users', 'tokens', 'rawendpointdata', 'modulebuilder', 'endpoints', 'saved_filters']
 
 const allEntities = computed(() => {
   const entities = metadataStore.entities || {}

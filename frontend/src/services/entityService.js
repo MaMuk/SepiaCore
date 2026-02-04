@@ -72,6 +72,59 @@ export class EntityService {
       throw error
     }
   }
+
+  /**
+   * List saved filters (optionally filtered by entity)
+   */
+  async listFilters(entityName = null) {
+    const params = new URLSearchParams()
+    if (entityName) {
+      params.append('entity', entityName)
+    }
+    const suffix = params.toString()
+    try {
+      const response = await api.get(`/filters${suffix ? `?${suffix}` : ''}`)
+      return response.data
+    } catch (error) {
+      throw error
+    }
+  }
+
+  /**
+   * Create a saved filter
+   */
+  async createFilter(payload = {}) {
+    try {
+      const response = await api.post('/filters', payload)
+      return response.data
+    } catch (error) {
+      throw error
+    }
+  }
+
+  /**
+   * Update a saved filter
+   */
+  async updateFilter(id, payload = {}) {
+    try {
+      const response = await api.put(`/filters/${id}`, payload)
+      return response.data
+    } catch (error) {
+      throw error
+    }
+  }
+
+  /**
+   * Delete a saved filter
+   */
+  async deleteFilter(id) {
+    try {
+      const response = await api.delete(`/filters/${id}`)
+      return response.data
+    } catch (error) {
+      throw error
+    }
+  }
 }
 
 export default new EntityService()

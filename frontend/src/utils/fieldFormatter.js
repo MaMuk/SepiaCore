@@ -5,14 +5,27 @@
 
 export function formatFieldValue(value, fieldDef, relationship = null) {
   if (!fieldDef) {
+    if (Array.isArray(value)) {
+      return value.length ? value.join(', ') : 'No items'
+    }
     return value !== null && value !== undefined ? String(value) : '-'
   }
 
   const fieldType = fieldDef.type
 
+  // Collections (array values) should render as badges/text even if type metadata is missing.
+  if (Array.isArray(value) && fieldType !== 'relationship') {
+    return value.length ? value.join(', ') : 'No items'
+  }
+
+  // Select-like fields: use options mapping whenever provided.
+  if (fieldDef.options && value !== null && value !== undefined && value !== '' && fieldType !== 'relationship') {
+    return fieldDef.options[value] || value
+  }
+
   // Select field
   if (fieldType === 'select') {
-    if (fieldDef.options && value) {
+    if (fieldDef.options && value !== null && value !== undefined && value !== '') {
       return fieldDef.options[value] || value
     }
     return '-'
@@ -44,8 +57,9 @@ export function formatFieldValue(value, fieldDef, relationship = null) {
 
   // Collection field
   if (fieldType === 'collection') {
-    if (Array.isArray(value) && value.length > 0) {
-      return value.join(', ')
+    const normalized = normalizeCollectionValue(value)
+    if (Array.isArray(normalized) && normalized.length > 0) {
+      return normalized.join(', ')
     }
     return 'No items'
   }
@@ -65,15 +79,49 @@ export function formatFieldValue(value, fieldDef, relationship = null) {
  */
 export function formatFieldValueHTML(value, fieldDef, relationship = null, onClickHandler = null) {
   if (!fieldDef) {
+    if (Array.isArray(value)) {
+      if (!value.length) return '<span class="text-muted">No items</span>'
+      const badges = value.map(item => {
+        const escapedItem = String(item)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;')
+        return `<span class="badge bg-secondary me-1">${escapedItem}</span>`
+      }).join('')
+      return `<div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">${badges}</div>`
+    }
     const displayValue = value !== null && value !== undefined ? String(value) : '-'
     return displayValue === '-' ? '<span class="text-muted">-</span>' : displayValue
   }
 
   const fieldType = fieldDef.type
 
+  if (Array.isArray(value) && fieldType !== 'relationship') {
+    const normalized = normalizeCollectionValue(value)
+    if (Array.isArray(normalized) && normalized.length > 0) {
+      const badges = normalized.map(item => {
+        const escapedItem = String(item)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;')
+        return `<span class="badge bg-secondary me-1">${escapedItem}</span>`
+      }).join('')
+      return `<div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">${badges}</div>`
+    }
+    return '<span class="text-muted">No items</span>'
+  }
+
+  if (fieldDef.options && value !== null && value !== undefined && value !== '' && fieldType !== 'relationship') {
+    return fieldDef.options[value] || value
+  }
+
   // Select field
   if (fieldType === 'select') {
-    if (fieldDef.options && value) {
+    if (fieldDef.options && value !== null && value !== undefined && value !== '') {
       return fieldDef.options[value] || value
     }
     return '<span class="text-muted">-</span>'
@@ -117,8 +165,9 @@ export function formatFieldValueHTML(value, fieldDef, relationship = null, onCli
 
   // Collection field
   if (fieldType === 'collection') {
-    if (Array.isArray(value) && value.length > 0) {
-      const badges = value.map(item => {
+    const normalized = normalizeCollectionValue(value)
+    if (Array.isArray(normalized) && normalized.length > 0) {
+      const badges = normalized.map(item => {
         const escapedItem = String(item)
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
@@ -144,3 +193,21 @@ export function formatFieldValueHTML(value, fieldDef, relationship = null, onCli
   return displayValue === '-' ? '<span class="text-muted">-</span>' : displayValue
 }
 
+function normalizeCollectionValue(value) {
+  if (Array.isArray(value)) return value
+  if (value === null || value === undefined || value === '') return []
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        return Array.isArray(parsed) ? parsed : [parsed]
+      } catch (error) {
+        return trimmed.split(',').map(item => item.trim()).filter(Boolean)
+      }
+    }
+    return trimmed.split(',').map(item => item.trim()).filter(Boolean)
+  }
+  return [value]
+}

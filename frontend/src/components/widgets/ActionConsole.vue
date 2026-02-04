@@ -97,13 +97,16 @@ import { useAuthStore } from '../../stores/auth'
 import { useToastStore } from '../../stores/toast'
 import { useWinbox } from '../../composables/useWinbox'
 import entityService from '../../services/entityService'
+import api from '../../services/api'
 import { getListLimit } from '../../config'
 
 const COMMANDS = ['search', 'filter', 'new', 'help', 'clear']
-const OPERATORS = ['eq', 'contains', 'starts_with', 'ends_with', 'not_empty', 'gt', 'gte', 'lt', 'lte']
+const OPERATORS = ['eq', 'contains', 'starts_with', 'ends_with', 'not_empty', 'empty', 'gt', 'gte', 'lt', 'lte', 'in']
 const HISTORY_STORAGE_PREFIX = 'action_console_history'
 const LIVE_SEARCH_DEBOUNCE = 200
 const LIVE_FILTER_DEBOUNCE = 250
+const RELATIONSHIP_SUGGEST_DEBOUNCE = 200
+const RELATIONSHIP_MIN_SEARCH = 2
 const RESULT_PREVIEW_LIMIT = 5
 
 const metadataStore = useMetadataStore()
@@ -127,6 +130,7 @@ const historyNavActive = ref(false)
 const historyNavIndex = ref(-1)
 
 const storedFilters = ref({})
+const storedFiltersLoading = ref({})
 const listLimit = ref(getListLimit())
 
 const inputRef = ref(null)
@@ -136,6 +140,10 @@ let liveSearchTimeout = null
 let liveFilterTimeout = null
 let liveSearchRequestId = 0
 let liveFilterRequestId = 0
+let relationshipSuggestTimeout = null
+let relationshipSuggestRequestId = 0
+let lastRelationshipSuggestSignature = ''
+let lastRelationshipSuggestIds = []
 
 const availableEntities = computed(() => {
   const entities = metadataStore.entities || {}
@@ -199,6 +207,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearTimeout(liveSearchTimeout)
   clearTimeout(liveFilterTimeout)
+  clearTimeout(relationshipSuggestTimeout)
 })
 
 watch(historyStorageKey, () => loadCommandHistory())
@@ -316,6 +325,7 @@ function updateSuggestions() {
   const entityToken = tokens[1] || ''
   const fieldToken = tokens[2] || ''
   const operatorToken = tokens[3] || ''
+  const valueToken = tokens.slice(4).join(' ')
   const usingStoredFilter = commandToken === 'filter' && fieldToken.startsWith('?')
 
   let list = []
@@ -347,7 +357,9 @@ function updateSuggestions() {
       if (tokens.length === 3) {
         list = buildFieldSuggestions(entityToken, fieldToken)
       } else if (tokens.length === 4) {
-        list = buildOperatorSuggestions(operatorToken)
+        list = buildOperatorSuggestions(entityToken, fieldToken, operatorToken)
+      } else if (tokens.length >= 5) {
+        list = buildValueSuggestions(entityToken, fieldToken, operatorToken, valueToken, input)
       }
     }
   }
@@ -372,14 +384,15 @@ function buildFieldSuggestions(entityName, token) {
   const fields = Object.keys(entityMeta.fields || {})
   return filterByPrefix(fields, token).map(field => ({
     value: field,
-    label: formatFieldName(field),
+    label: field,
     subLabel: 'field',
     type: 'field'
   }))
 }
 
-function buildOperatorSuggestions(token) {
-  return filterByPrefix(OPERATORS, token).map(op => ({
+function buildOperatorSuggestions(entityName, fieldName, token) {
+  const allowed = getAllowedOperators(entityName, fieldName)
+  return filterByPrefix(allowed, token).map(op => ({
     value: op,
     label: op,
     subLabel: 'operator',
@@ -399,6 +412,88 @@ function buildStoredFilterSuggestions(entityName, token) {
         subLabel: 'stored filter',
         type: 'stored-filter'
       }))
+}
+
+function buildValueSuggestions(entityName, fieldName, operator, token, signature) {
+  const fieldDef = getFieldDef(entityName, fieldName)
+  if (!fieldDef) return []
+  if (isOperatorWithoutValue(operator)) return []
+  const allowed = getAllowedOperators(entityName, fieldName)
+  if (!allowed.includes(operator)) return []
+
+  const fieldType = fieldDef.type || 'text'
+  const trimmedToken = token ?? ''
+
+  if (fieldType === 'select') {
+    return buildSelectValueSuggestions(fieldDef, operator, trimmedToken)
+  }
+
+  if (fieldType === 'relationship') {
+    scheduleRelationshipValueSuggestions(fieldDef, operator, trimmedToken, signature)
+    return []
+  }
+
+  return []
+}
+
+function buildSelectValueSuggestions(fieldDef, operator, token) {
+  const options = normalizeSelectOptions(fieldDef?.options)
+  if (!options.length) return []
+
+  const { prefix, needle } = splitValueToken(token, operator)
+  return filterByPrefix(options.map(option => option.value), needle).map(value => ({
+    value,
+    insertValue: `${prefix}${value}`,
+    label: value,
+    subLabel: 'select value',
+    type: 'select-value'
+  }))
+}
+
+function scheduleRelationshipValueSuggestions(fieldDef, operator, token, signature) {
+  if (!fieldDef?.entity) {
+    return
+  }
+  if (operator === 'in') {
+    return
+  }
+  const query = token.trim()
+  if (query.length < RELATIONSHIP_MIN_SEARCH) {
+    return
+  }
+
+  clearTimeout(relationshipSuggestTimeout)
+  relationshipSuggestTimeout = setTimeout(async () => {
+    relationshipSuggestRequestId += 1
+    const requestId = relationshipSuggestRequestId
+    try {
+      lastRelationshipSuggestSignature = ''
+      lastRelationshipSuggestIds = []
+      const response = await api.get(`/relationship/${fieldDef.entity}`, {
+        params: { search: query }
+      })
+      if (requestId !== relationshipSuggestRequestId) return
+      if (inputValue.value !== signature) return
+      const results = Array.isArray(response.data) ? response.data : []
+      const suggestionsList = results
+        .filter(item => item?.id !== '')
+        .map(item => ({
+          value: String(item.id),
+          insertValue: String(item.id),
+          label: item?.name ? String(item.name) : String(item.id),
+          subLabel: String(item.id),
+          type: 'relationship-value'
+        }))
+      lastRelationshipSuggestSignature = signature
+      lastRelationshipSuggestIds = suggestionsList.map(item => item.value)
+      if (inputValue.value === signature) {
+        suggestions.value = suggestionsList
+        activeSuggestionIndex.value = 0
+      }
+    } catch (error) {
+      if (requestId !== relationshipSuggestRequestId) return
+    }
+  }, RELATIONSHIP_SUGGEST_DEBOUNCE)
 }
 
 function acceptSuggestion(suggestion, index) {
@@ -471,7 +566,7 @@ function resetHistoryNavigation() {
   historyNavIndex.value = -1
 }
 
-function executeCommand() {
+async function executeCommand() {
   const rawInput = inputValue.value
   const trimmed = rawInput.trim()
   if (!trimmed) return
@@ -550,7 +645,11 @@ function executeCommand() {
 
     if (remainder[0].startsWith('?')) {
       const filterName = remainder.join(' ').replace(/^\?/, '')
-      const filterDef = getStoredFilterByName(entityName, filterName)
+      let filterDef = getStoredFilterByName(entityName, filterName)
+      if (!filterDef) {
+        await fetchStoredFilters(entityName)
+        filterDef = getStoredFilterByName(entityName, filterName)
+      }
       if (!filterDef) {
         addHistoryLine('>', `Stored filter "${filterName}" not found`)
         return
@@ -571,12 +670,22 @@ function executeCommand() {
       addHistoryLine('>', `Operator must be one of: ${OPERATORS.join(', ')}`)
       return
     }
-    if (!value && operator !== 'not_empty') {
-      addHistoryLine('>', 'Filter value cannot be empty (except for not_empty)')
+    const allowedOperators = getAllowedOperators(entityName, field)
+    if (!allowedOperators.includes(operator)) {
+      addHistoryLine('>', `Operator "${operator}" is not supported for ${field}`)
+      return
+    }
+    if (!value && !isOperatorWithoutValue(operator)) {
+      addHistoryLine('>', 'Filter value cannot be empty (except for not_empty/empty)')
       return
     }
 
-    runAdhocFilterCommand(entityName, field, operator, value || null)
+    const normalizedValue = normalizeFilterValue(entityName, field, operator, value)
+    if (normalizedValue === undefined) {
+      addHistoryLine('>', 'Invalid filter value')
+      return
+    }
+    runAdhocFilterCommand(entityName, field, operator, normalizedValue)
     return
   }
 
@@ -736,12 +845,22 @@ function scheduleLiveQueries() {
     }
 
     const valueToken = tokens.slice(4).join(' ')
-    const hasValue = valueToken || operatorToken === 'not_empty'
+    const hasValue = valueToken || isOperatorWithoutValue(operatorToken)
+    const allowedOperators = getAllowedOperators(entityName, fieldToken)
 
-    if (fieldToken && operatorToken && OPERATORS.includes(operatorToken) && hasValue) {
+    if (fieldToken && operatorToken && OPERATORS.includes(operatorToken) && hasValue && allowedOperators.includes(operatorToken)) {
+      if (shouldDeferRelationshipLiveFilter(entityName, fieldToken, operatorToken, valueToken)) {
+        if (resultsSource.value === 'live-filter') clearResults()
+        return
+      }
+      const normalizedValue = normalizeFilterValue(entityName, fieldToken, operatorToken, valueToken)
+      if (normalizedValue === undefined) {
+        if (resultsSource.value === 'live-filter') clearResults()
+        return
+      }
       const payload = {
         filters: [
-          { field: fieldToken, operator: operatorToken, value: valueToken || null }
+          { field: fieldToken, operator: operatorToken, value: normalizedValue }
         ],
         limit: listLimit.value,
         page: 1
@@ -880,11 +999,46 @@ function ensureStoredFilters(entityName) {
   if (!storedFilters.value[entityName]) {
     storedFilters.value = {
       ...storedFilters.value,
-      [entityName]: [
-        { id: 1, name: `Mock filter #1 (${formatEntityName(entityName)})` }
-      ]
+      [entityName]: []
+    }
+    fetchStoredFilters(entityName)
+  }
+  return storedFilters.value[entityName]
+}
+
+async function fetchStoredFilters(entityName) {
+  if (!entityName) return []
+  if (storedFiltersLoading.value[entityName]) {
+    return storedFilters.value[entityName] || []
+  }
+
+  storedFiltersLoading.value = {
+    ...storedFiltersLoading.value,
+    [entityName]: true
+  }
+
+  try {
+    const response = await entityService.listFilters(entityName)
+    const records = response?.records ?? response ?? []
+    storedFilters.value = {
+      ...storedFilters.value,
+      [entityName]: Array.isArray(records) ? records : []
+    }
+    if (inputValue.value) {
+      updateSuggestions()
+    }
+  } catch (error) {
+    storedFilters.value = {
+      ...storedFilters.value,
+      [entityName]: storedFilters.value[entityName] || []
+    }
+  } finally {
+    storedFiltersLoading.value = {
+      ...storedFiltersLoading.value,
+      [entityName]: false
     }
   }
+
   return storedFilters.value[entityName]
 }
 
@@ -892,6 +1046,103 @@ function getStoredFilterByName(entityName, name) {
   const filters = ensureStoredFilters(entityName)
   const lower = (name || '').toLowerCase()
   return filters.find(filter => filter.name.toLowerCase() === lower) || null
+}
+
+function getFieldDef(entityName, fieldName) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName) || {}
+  return entityMeta.fields?.[fieldName] || null
+}
+
+function getAllowedOperators(entityName, fieldName) {
+  const fieldDef = getFieldDef(entityName, fieldName)
+  const fieldType = fieldDef?.type || 'text'
+
+  const map = {
+    boolean: ['eq'],
+    checkbox: ['eq'],
+    select: ['eq', 'in', 'not_empty', 'empty'],
+    date: ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty', 'empty'],
+    datetime: ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty', 'empty'],
+    relationship: ['eq', 'not_empty', 'empty']
+  }
+
+  if (map[fieldType]) return map[fieldType]
+  return ['eq', 'contains', 'starts_with', 'ends_with', 'not_empty', 'empty', 'gt', 'gte', 'lt', 'lte']
+}
+
+function isOperatorWithoutValue(operator) {
+  return operator === 'not_empty' || operator === 'empty'
+}
+
+function normalizeFilterValue(entityName, fieldName, operator, rawValue) {
+  if (isOperatorWithoutValue(operator)) return null
+  const value = (rawValue ?? '').trim()
+  if (!value) return undefined
+
+  const fieldDef = getFieldDef(entityName, fieldName)
+  const fieldType = fieldDef?.type || 'text'
+
+  if (fieldType === 'boolean' || fieldType === 'checkbox') {
+    const normalized = value.toLowerCase()
+    if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true
+    if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false
+    return undefined
+  }
+
+  if (operator === 'in') {
+    const list = value.split(',').map(item => item.trim()).filter(Boolean)
+    return list.length ? list : undefined
+  }
+
+  return value
+}
+
+function normalizeSelectOptions(options) {
+  if (!options) return []
+  if (Array.isArray(options)) {
+    return options.map(option => ({
+      value: String(option),
+      label: String(option)
+    }))
+  }
+  return Object.entries(options).map(([value, label]) => ({
+    value: String(value),
+    label: String(label)
+  }))
+}
+
+function splitValueToken(token, operator) {
+  if (operator !== 'in') {
+    return { prefix: '', needle: token.trim() }
+  }
+  const raw = token || ''
+  const lastComma = raw.lastIndexOf(',')
+  if (lastComma === -1) {
+    return { prefix: '', needle: raw.trim() }
+  }
+  const prefix = `${raw.slice(0, lastComma + 1)} `
+  const needle = raw.slice(lastComma + 1).trim()
+  return { prefix, needle }
+}
+
+function shouldDeferRelationshipLiveFilter(entityName, fieldName, operator, rawValue) {
+  const fieldDef = getFieldDef(entityName, fieldName)
+  if (!fieldDef || fieldDef.type !== 'relationship') return false
+  if (isOperatorWithoutValue(operator)) return false
+  if (operator !== 'eq') return false
+
+  const value = (rawValue ?? '').trim()
+  if (!value) return true
+
+  if (value.length < RELATIONSHIP_MIN_SEARCH) {
+    return true
+  }
+
+  if (lastRelationshipSuggestSignature !== inputValue.value) {
+    return true
+  }
+
+  return !lastRelationshipSuggestIds.includes(value)
 }
 
 function extractRecords(response) {

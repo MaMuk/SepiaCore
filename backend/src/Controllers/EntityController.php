@@ -244,11 +244,15 @@ class EntityController extends BaseController
             $this->jsonHalt(['error' => 'No filters provided'], 400);
         }
 
+        $this->validateFilters($normalizedFilters);
+
         $result = $this->runFilterScan($normalizedFilters, $params, $payload);
         $response = [
             'records' => $result['records'],
             'total' => $result['total'],
         ];
+        $fieldDefinitions = $GLOBALS['metadata']['entities'][$this->model]['fields'] ?? [];
+        $response['relationship'] = $this->getRelationshipDataForList($result['records'], $fieldDefinitions);
         if ($storedFilter) {
             $response['filter'] = $storedFilter;
         }
@@ -264,38 +268,42 @@ class EntityController extends BaseController
      */
     protected function getStoredFilterDefinition(string $model, $filterId, array $payload): ?array
     {
-        if ((int) $filterId !== 1) {
+        $userId = $GLOBALS['user_id'] ?? null;
+        if (empty($userId)) {
             return null;
         }
 
-        $fields = $GLOBALS['metadata']['entities'][$model]['fields'] ?? [];
-        $targetField = 'name';
-        if (!array_key_exists($targetField, $fields)) {
-            $targetField = array_key_exists('title', $fields) ? 'title' : null;
+        $filtersEntity = $this->getEntityClass('saved_filters');
+        $record = $filtersEntity->read($filterId);
+        if (!$record) {
+            return null;
         }
-        if (!$targetField) {
-            $targetField = array_key_first($fields) ?: 'id';
+        if (($record['owner'] ?? null) !== $userId) {
+            return null;
+        }
+        if (($record['entity'] ?? null) !== $model) {
+            return null;
         }
 
-        $value = $payload['value'] ?? ($payload['query'] ?? null);
-        $filters = [];
-        if ($value !== null && $value !== '') {
-            $filters[] = [
-                'field' => $targetField,
-                'operator' => 'contains',
-                'value' => $value,
-            ];
-        } else {
-            $filters[] = [
-                'field' => $targetField,
-                'operator' => 'not_empty',
-            ];
+        $definition = $record['definition'] ?? null;
+        if (is_string($definition)) {
+            $decoded = json_decode($definition, true);
+            $definition = (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : null;
+        }
+        if (!is_array($definition)) {
+            return null;
+        }
+
+        $filters = $definition['filters'] ?? null;
+        $normalizedFilters = $this->normalizeFilters($filters);
+        if (empty($normalizedFilters)) {
+            return null;
         }
 
         return [
-            'id' => 1,
-            'name' => "Mock filter: {$targetField}",
-            'filters' => $filters,
+            'id' => $record['id'],
+            'name' => $record['name'] ?? 'Saved filter',
+            'filters' => $normalizedFilters,
         ];
     }
 
@@ -410,6 +418,11 @@ class EntityController extends BaseController
             $operator = strtolower($filter['operator'] ?? 'eq');
             $expected = $filter['value'] ?? null;
             $actual = $record[$field] ?? null;
+            $fieldType = $this->getFieldType($field);
+
+            if (!in_array($operator, ['not_empty', 'empty'], true) && !$this->isOperatorAllowedForType($operator, $fieldType)) {
+                return false;
+            }
 
             switch ($operator) {
                 case 'contains':
@@ -441,28 +454,36 @@ class EntityController extends BaseController
                     }
                     break;
                 case 'in':
-                    $list = is_array($expected) ? $expected : explode(',', (string) $expected);
+                    $list = $this->normalizeListValue($expected);
+                    if (in_array($fieldType, ['select', 'relationship'], true)) {
+                        $actualValue = $actual === null ? null : (string) $actual;
+                        $list = array_map('strval', $list);
+                        if (!in_array($actualValue, $list, true)) {
+                            return false;
+                        }
+                        break;
+                    }
                     if (!in_array($actual, $list, false)) {
                         return false;
                     }
                     break;
                 case 'gt':
-                    if (floatval($actual) <= floatval($expected)) {
+                    if ($this->compareComparable($actual, $expected, $fieldType, 'gt') === false) {
                         return false;
                     }
                     break;
                 case 'gte':
-                    if (floatval($actual) < floatval($expected)) {
+                    if ($this->compareComparable($actual, $expected, $fieldType, 'gte') === false) {
                         return false;
                     }
                     break;
                 case 'lt':
-                    if (floatval($actual) >= floatval($expected)) {
+                    if ($this->compareComparable($actual, $expected, $fieldType, 'lt') === false) {
                         return false;
                     }
                     break;
                 case 'lte':
-                    if (floatval($actual) > floatval($expected)) {
+                    if ($this->compareComparable($actual, $expected, $fieldType, 'lte') === false) {
                         return false;
                     }
                     break;
@@ -471,25 +492,221 @@ class EntityController extends BaseController
                         return false;
                     }
                     break;
+                case 'empty':
+                    if (in_array($fieldType, ['boolean', 'checkbox'], true)) {
+                        $actualBool = $this->normalizeBoolean($actual);
+                        return $actualBool === false;
+                    }
+                    if ($actual !== null && $actual !== '') {
+                        if (is_array($actual) && count($actual) === 0) {
+                            break;
+                        }
+                        return false;
+                    }
+                    break;
+                case 'eq':
+                    if (!$this->matchesEquality($actual, $expected, $fieldType)) {
+                        return false;
+                    }
+                    break;
                 default:
-                    if (is_array($expected)) {
-                        if (!in_array($actual, $expected, false)) {
-                            return false;
-                        }
-                    } elseif (is_numeric($expected) && is_numeric($actual)) {
-                        if (floatval($actual) !== floatval($expected)) {
-                            return false;
-                        }
-                    } else {
-                        if ((string) $actual !== (string) $expected) {
-                            return false;
-                        }
+                    if (!$this->matchesEquality($actual, $expected, $fieldType)) {
+                        return false;
                     }
                     break;
             }
         }
 
         return true;
+    }
+
+    /**
+     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @return void
+     */
+    protected function validateFilters(array $filters): void
+    {
+        foreach ($filters as $filter) {
+            $field = $filter['field'] ?? null;
+            if (!$field) {
+                continue;
+            }
+            $operator = strtolower($filter['operator'] ?? 'eq');
+            $fieldType = $this->getFieldType($field);
+            if (!$fieldType || in_array($operator, ['not_empty', 'empty'], true)) {
+                continue;
+            }
+            if (!$this->isOperatorAllowedForType($operator, $fieldType)) {
+                $this->jsonHalt([
+                    'error' => "Operator '{$operator}' is not supported for '{$field}' ({$fieldType})"
+                ], 400);
+            }
+        }
+    }
+
+    protected function getFieldType(string $field): ?string
+    {
+        $fields = $GLOBALS['metadata']['entities'][$this->model]['fields'] ?? [];
+        return $fields[$field]['type'] ?? null;
+    }
+
+    protected function isOperatorAllowedForType(string $operator, ?string $fieldType): bool
+    {
+        if (!$fieldType) {
+            return true;
+        }
+        if ($operator === 'empty') {
+            return true;
+        }
+
+        $map = [
+            'boolean' => ['eq'],
+            'checkbox' => ['eq'],
+            'select' => ['eq', 'in', 'not_empty'],
+            'date' => ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty'],
+            'datetime' => ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty'],
+            'relationship' => ['eq', 'in', 'not_empty'],
+        ];
+
+        if (!array_key_exists($fieldType, $map)) {
+            return true;
+        }
+
+        return in_array($operator, $map[$fieldType], true);
+    }
+
+    protected function matchesEquality($actual, $expected, ?string $fieldType): bool
+    {
+        if (is_array($expected)) {
+            if (in_array($fieldType, ['select', 'relationship'], true)) {
+                $list = array_map('strval', $expected);
+                return in_array($actual === null ? null : (string) $actual, $list, true);
+            }
+            return in_array($actual, $expected, false);
+        }
+
+        if (in_array($fieldType, ['boolean', 'checkbox'], true)) {
+            $actualBool = $this->normalizeBoolean($actual);
+            $expectedBool = $this->normalizeBoolean($expected);
+            if ($actualBool === null || $expectedBool === null) {
+                return false;
+            }
+            return $actualBool === $expectedBool;
+        }
+
+        if (in_array($fieldType, ['date', 'datetime'], true)) {
+            $actualTime = $this->normalizeDateValue($actual);
+            $expectedTime = $this->normalizeDateValue($expected);
+            if ($actualTime === null || $expectedTime === null) {
+                return false;
+            }
+            return $actualTime === $expectedTime;
+        }
+
+        if (in_array($fieldType, ['select', 'relationship'], true)) {
+            return (string) $actual === (string) $expected;
+        }
+
+        if (is_numeric($expected) && is_numeric($actual)) {
+            return floatval($actual) === floatval($expected);
+        }
+
+        return (string) $actual === (string) $expected;
+    }
+
+    protected function compareComparable($actual, $expected, ?string $fieldType, string $operator): bool
+    {
+        if (in_array($fieldType, ['date', 'datetime'], true)) {
+            $actualTime = $this->normalizeDateValue($actual);
+            $expectedTime = $this->normalizeDateValue($expected);
+            if ($actualTime === null || $expectedTime === null) {
+                return false;
+            }
+            switch ($operator) {
+                case 'gt':
+                    return $actualTime > $expectedTime;
+                case 'gte':
+                    return $actualTime >= $expectedTime;
+                case 'lt':
+                    return $actualTime < $expectedTime;
+                case 'lte':
+                    return $actualTime <= $expectedTime;
+                default:
+                    return false;
+            }
+        }
+
+        switch ($operator) {
+            case 'gt':
+                return floatval($actual) > floatval($expected);
+            case 'gte':
+                return floatval($actual) >= floatval($expected);
+            case 'lt':
+                return floatval($actual) < floatval($expected);
+            case 'lte':
+                return floatval($actual) <= floatval($expected);
+            default:
+                return false;
+        }
+    }
+
+    protected function normalizeBoolean($value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value === 1 ? true : ($value === 0 ? false : null);
+        }
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, ['true', '1', 'yes', 'y', 'on'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['false', '0', 'no', 'n', 'off'], true)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    protected function normalizeDateValue($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_float($value)) {
+            return (int) $value;
+        }
+        if (is_numeric($value)) {
+            $numeric = (float) $value;
+            if ($numeric > 1000000000000) {
+                return (int) floor($numeric / 1000);
+            }
+            return (int) $numeric;
+        }
+        if (is_string($value)) {
+            $timestamp = strtotime($value);
+            if ($timestamp !== false) {
+                return $timestamp;
+            }
+        }
+        return null;
+    }
+
+    protected function normalizeListValue($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if ($value === null || $value === '') {
+            return [];
+        }
+        $parts = explode(',', (string) $value);
+        return array_values(array_filter(array_map('trim', $parts), fn($item) => $item !== ''));
     }
 
     /**

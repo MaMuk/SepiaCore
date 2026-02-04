@@ -222,7 +222,7 @@ class EntityStudioController extends BaseController
     public function deleteEntity(string $entityName): array
     {
         $entityKey = strtolower($entityName);
-        $protectedEntities = ['users', 'tokens', 'modulebuilder', 'dashboards'];
+        $protectedEntities = ['users', 'tokens', 'modulebuilder', 'dashboards', 'saved_filters'];
         $className = ucfirst($entityKey);
 
         if (in_array($entityKey, $protectedEntities, true)) {

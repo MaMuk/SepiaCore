@@ -12,6 +12,7 @@ use SepiaCore\Controllers\EndpointController;
 use SepiaCore\Controllers\OpenApiController;
 use SepiaCore\Controllers\UsersController;
 use SepiaCore\Controllers\DashboardController;
+use SepiaCore\Controllers\FiltersController;
 
 // ==========================================
 // Public Routes (No Authentication)
@@ -212,6 +213,35 @@ Flight::route('PUT /dashboard/@id/default', function($id) {
 Flight::route('DELETE /dashboard/@id', function($id) {
     $controller = new DashboardController();
     $controller->deleteDashboard($id);
+});
+
+// ==========================================
+// Saved Filters Routes
+// ==========================================
+
+Flight::route('GET /filters', function() {
+    $controller = new FiltersController();
+    $controller->index();
+});
+
+Flight::route('GET /filters/@id', function($id) {
+    $controller = new FiltersController();
+    $controller->show($id);
+});
+
+Flight::route('POST /filters', function() {
+    $controller = new FiltersController();
+    $controller->store();
+});
+
+Flight::route('PUT /filters/@id', function($id) {
+    $controller = new FiltersController();
+    $controller->update($id);
+});
+
+Flight::route('DELETE /filters/@id', function($id) {
+    $controller = new FiltersController();
+    $controller->destroy($id);
 });
 
 // ==========================================

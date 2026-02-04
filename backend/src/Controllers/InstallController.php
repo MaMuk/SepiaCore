@@ -405,6 +405,25 @@ class InstallController extends BaseController
             });
         }
 
+        // Saved filters table
+        if (!Capsule::schema()->hasTable('saved_filters')) {
+            Capsule::schema()->create('saved_filters', function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('name')->index();
+                $table->string('entity')->index();
+                $table->longText('definition')->nullable();
+                $table->longText('description')->nullable();
+                $table->string('color')->nullable();
+                $table->longText('tags')->nullable();
+                $table->boolean('is_shared')->default(0);
+                $table->uuid('owner')->nullable()->index();
+                $table->timestamp('date_created')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+                $table->timestamp('date_modified')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+
+                $table->foreign('owner')->references('id')->on('users')->onDelete('cascade');
+            });
+        }
+
         // --- 3. Insert admin user via your Entity class ---
         $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
         $users = $this->getEntityClass('users');
@@ -901,6 +920,39 @@ class InstallController extends BaseController
                         'widgets' => ['type' => 'collection'],
                         'date_created' => ['type' => 'datetime', 'readonly' => true],
                         'date_modified' => ['type' => 'datetime', 'readonly' => true],
+                    ],
+                    'capabilities' => [
+                        'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                    ]
+                ],
+                'saved_filters' => [
+                    'fields' => [
+                        'id' => ['type' => 'uuid'],
+                        'name' => ['type' => 'string'],
+                        'entity' => ['type' => 'string'],
+                        'definition' => ['type' => 'text'],
+                        'description' => ['type' => 'textarea'],
+                        'color' => ['type' => 'string'],
+                        'tags' => ['type' => 'collection'],
+                        'is_shared' => ['type' => 'boolean'],
+                        'owner' => ['type' => 'relationship', 'entity' => 'users'],
+                        'date_created' => ['type' => 'datetime', 'readonly' => true],
+                        'date_modified' => ['type' => 'datetime', 'readonly' => true],
+                    ],
+                    'module_views' => [
+                        'list' => [
+                            'isdefault' => true,
+                            'layout' => [
+                                'name',
+                                'entity',
+                                'owner',
+                                'date_modified',
+                            ],
+                        ],
                     ],
                     'capabilities' => [
                         'action-console' =>

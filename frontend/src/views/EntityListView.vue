@@ -21,6 +21,14 @@
         </button>
       </div>
 
+      <EntityFilters
+        class="mb-3"
+        :entity-name="entityName"
+        :entity-display-name="entityDisplayName"
+        :fields="filterFieldOptions"
+        @filter-change="handleFilterChange"
+      />
+
       <div v-if="error" class="alert alert-danger" role="alert">
         {{ error }}
       </div>
@@ -35,7 +43,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMetadataStore } from '../stores/metadata'
 import { useToastStore } from '../stores/toast'
@@ -43,7 +51,9 @@ import { useAuthStore } from '../stores/auth'
 import { Grid, html } from 'gridjs'
 import { LIST_LIMIT, API_BASE_URL } from '../config'
 import { useWinbox } from '../composables/useWinbox'
+import entityService from '../services/entityService'
 import { formatFieldValueHTML } from '../utils/fieldFormatter'
+import EntityFilters from '../components/EntityFilters.vue'
 import 'gridjs/dist/theme/mermaid.css'
 
 const route = useRoute()
@@ -66,6 +76,8 @@ const recordsById = ref({})
 const relationshipsCache = ref({})
 const isSearching = ref(false)
 const entityNotFound = ref(false)
+const activeFilter = ref(null)
+const gridSessionId = ref(0)
 
 const listFields = computed(() => {
   return metadataStore.getEntityListLayout(entityName.value)
@@ -73,6 +85,17 @@ const listFields = computed(() => {
 
 const columnKeys = computed(() => {
   return listFields.value.map(col => typeof col === 'string' ? col : (col.id || col.name))
+})
+
+const filterFieldOptions = computed(() => {
+  const fields = metadataStore.getEntityMetadata(entityName.value)?.fields || {}
+  return Object.entries(fields).map(([name, def]) => ({
+    name,
+    label: formatFieldName(name),
+    type: def?.type || 'text',
+    options: def?.options || null,
+    entity: def?.entity || null
+  }))
 })
 
 onMounted(async () => {
@@ -87,18 +110,24 @@ onBeforeUnmount(() => {
   if (grid.value) {
     grid.value.destroy()
   }
+  grid.value = null
+  clearGridState()
 })
 
 watch(() => route.params.entity, async () => {
   if (grid.value) {
     grid.value.destroy()
   }
+  grid.value = null
   // Reset search state when entity changes
   isSearching.value = false
   entityNotFound.value = false
+  activeFilter.value = null
+  clearGridState()
   await loadMetadata()
   checkEntityExists()
   if (!entityNotFound.value && listFields.value.length > 0) {
+    await nextTick()
     initializeGrid()
   }
 })
@@ -121,6 +150,19 @@ function checkEntityExists() {
   }
 }
 
+function handleFilterChange(nextFilter) {
+  activeFilter.value = nextFilter
+  error.value = null
+  refreshGrid()
+}
+
+function refreshGrid() {
+  if (grid.value) {
+    grid.value.config.pipeline.clearCache()
+    grid.value.forceRender()
+  }
+}
+
 function goHome() {
   router.push('/')
 }
@@ -131,11 +173,17 @@ function initializeGrid() {
   error.value = null
   // Reset search state when initializing grid
   isSearching.value = false
+  clearGridState()
+  gridSessionId.value += 1
+  const sessionId = gridSessionId.value
   const server = API_BASE_URL
   const token = authStore.token || ''
 
   // Get field definitions
   const fieldDefinitions = metadataStore.getEntityMetadata(entityName.value)?.fields || {}
+  const relationshipFieldKeys = Object.entries(fieldDefinitions)
+    .filter(([, def]) => def?.type === 'relationship')
+    .map(([key]) => key)
 
   // Create columns from listFields with formatters
   const columns = listFields.value.map((col, index) => {
@@ -208,6 +256,9 @@ function initializeGrid() {
           if (fieldDef?.type === 'relationship' && cell) {
             return html(`<span class="text-muted">${cell}</span>`)
           }
+          if (fieldDef) {
+            return html(formatFieldValueHTML(cell, fieldDef, null, true))
+          }
           return cell || '-'
         }
         
@@ -220,6 +271,50 @@ function initializeGrid() {
       }
     }
   })
+
+  const fetchGridData = async (opts) => {
+    const params = parseGridParams(opts?.url, server)
+    const hasActiveFilter = !!activeFilter.value?.payload
+    isSearching.value = !hasActiveFilter && !!params.search
+
+    try {
+      let response = null
+      if (hasActiveFilter) {
+        const payload = {
+          ...activeFilter.value.payload,
+          page: params.page,
+          limit: params.limit,
+          sort: params.sort,
+          order: params.order
+        }
+        response = await entityService.filter(entityName.value, payload)
+      } else {
+        response = await entityService.getList(entityName.value, {
+          page: params.page,
+          limit: params.limit,
+          search: params.search,
+          sort: params.sort,
+          order: params.order
+        })
+      }
+
+      if (sessionId !== gridSessionId.value) {
+        return { data: [], total: 0 }
+      }
+
+      const records = extractRecordsFromResponse(response)
+      const relationships = response?.relationship || buildRelationshipFallback(records, relationshipFieldKeys)
+      setRecordCaches(records, relationships, sessionId)
+      const total = (!hasActiveFilter && params.search) ? records.length : (response?.total ?? records.length)
+
+      return {
+        data: mapRecordsToRows(records),
+        total
+      }
+    } catch (err) {
+      throw err
+    }
+  }
 
   grid.value = new Grid({
     columns: columns,
@@ -234,7 +329,7 @@ function initializeGrid() {
           
           // Track search state - only true if keyword exists and is not empty
           const hasKeyword = keyword && keyword.trim()
-          isSearching.value = !!hasKeyword
+          isSearching.value = !!hasKeyword && !activeFilter.value
           
           if (hasKeyword) {
             url.searchParams.set('search', keyword.trim())
@@ -266,7 +361,7 @@ function initializeGrid() {
           
           // Check if search parameter exists in URL
           const hasSearch = url.searchParams.has('search') && url.searchParams.get('search')
-          isSearching.value = !!hasSearch
+          isSearching.value = !!hasSearch && !activeFilter.value
           
           url.searchParams.set('sort', colName)
           url.searchParams.set('order', dir.toUpperCase())
@@ -286,7 +381,7 @@ function initializeGrid() {
           
           // Check if search parameter exists in URL
           const hasSearch = url.searchParams.has('search') && url.searchParams.get('search')
-          isSearching.value = !!hasSearch
+          isSearching.value = !!hasSearch && !activeFilter.value
           
           url.searchParams.set('page', page + 1)
           url.searchParams.set('limit', limit)
@@ -301,39 +396,7 @@ function initializeGrid() {
       headers: {
         Authorization: token
       },
-      then: (json) => {
-        const records = json.records || []
-        // Store records for row click handling
-        recordsCache.value = records
-        // Create a map by ID for faster lookup
-        recordsById.value = {}
-        records.forEach(record => {
-          if (record.id) {
-            recordsById.value[record.id] = record
-          }
-        })
-        // Store relationship data if available
-        if (json.relationship) {
-          relationshipsCache.value = json.relationship
-        }
-        // Return data rows with values for each column
-        // Always include ID in row data for lookup, even if not displayed
-        return records.map(record => {
-          const rowData = columnKeys.value.map(key => record[key] ?? '')
-          // Store record ID in row data for formatter lookup
-          rowData._recordId = record.id
-          return rowData
-        })
-      },
-      total: (json) => {
-        // When searching, return the actual count of returned records
-        // Otherwise, use the total from the server
-        if (isSearching.value) {
-          const records = json.records || []
-          return records.length
-        }
-        return json.total || 0
-      }
+      data: fetchGridData
     }
   })
 
@@ -343,8 +406,9 @@ function initializeGrid() {
   })
 
   grid.value.on('error', (err) => {
-    error.value = 'Failed to load records'
-    toastStore.error('Failed to load records')
+    const message = activeFilter.value ? 'Failed to apply filter' : 'Failed to load records'
+    error.value = message
+    toastStore.error(message)
   })
 
   grid.value.on('cellClick', (cell, row, column) => {
@@ -390,6 +454,79 @@ function initializeGrid() {
   }
 
   grid.value.render(gridWrapper.value)
+}
+
+function clearGridState() {
+  recordsCache.value = []
+  recordsById.value = {}
+  relationshipsCache.value = {}
+  if (gridWrapper.value) {
+    gridWrapper.value.innerHTML = ''
+  }
+}
+
+function parseGridParams(urlString, baseUrl) {
+  const url = urlString ? new URL(urlString, baseUrl) : new URL(baseUrl)
+  const page = Number.parseInt(url.searchParams.get('page') || '1', 10)
+  const limit = Number.parseInt(url.searchParams.get('limit') || String(LIST_LIMIT), 10)
+  const sort = url.searchParams.get('sort') || 'date_modified'
+  const order = (url.searchParams.get('order') || 'DESC').toUpperCase()
+  const search = url.searchParams.get('search')
+  return {
+    page: Number.isNaN(page) ? 1 : page,
+    limit: Number.isNaN(limit) ? LIST_LIMIT : limit,
+    sort,
+    order,
+    search: search ? search.trim() : null
+  }
+}
+
+function extractRecordsFromResponse(response) {
+  if (!response) return []
+  if (Array.isArray(response)) return response
+  if (Array.isArray(response.records)) return response.records
+  if (Array.isArray(response.data)) return response.data
+  if (Array.isArray(response.list)) return response.list
+  return []
+}
+
+function buildRelationshipFallback(records, relationshipFieldKeys) {
+  if (!records?.length || !relationshipFieldKeys?.length) return {}
+  const fallback = {}
+  records.forEach(record => {
+    if (!record?.id) return
+    const relMap = {}
+    relationshipFieldKeys.forEach((fieldKey) => {
+      const value = record[fieldKey]
+      if (value) {
+        relMap[fieldKey] = { id: value }
+      }
+    })
+    if (Object.keys(relMap).length > 0) {
+      fallback[record.id] = relMap
+    }
+  })
+  return fallback
+}
+
+function setRecordCaches(records, relationships, sessionId) {
+  if (sessionId && sessionId !== gridSessionId.value) return
+  recordsCache.value = records
+  recordsById.value = {}
+  records.forEach(record => {
+    if (record.id) {
+      recordsById.value[record.id] = record
+    }
+  })
+  relationshipsCache.value = relationships || {}
+}
+
+function mapRecordsToRows(records) {
+  return records.map(record => {
+    const rowData = columnKeys.value.map(key => record[key] ?? '')
+    rowData._recordId = record.id
+    return rowData
+  })
 }
 
 function formatFieldName(field) {
