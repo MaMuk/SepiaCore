@@ -642,14 +642,14 @@ async function executeCommand() {
       return
     }
 
-    const remainder = tokens.slice(2)
-    if (!remainder.length) {
+    const remainderText = tokens.slice(2).join(' ').trim()
+    if (!remainderText) {
       addHistoryLine('>', 'Filter requires a field/operator/value or stored filter')
       return
     }
 
-    if (remainder[0].startsWith('?')) {
-      const filterName = remainder.join(' ').replace(/^\?/, '')
+    if (remainderText.startsWith('?')) {
+      const filterName = remainderText.replace(/^\?/, '')
       let filterDef = getStoredFilterByName(entityName, filterName)
       if (!filterDef) {
         await fetchStoredFilters(entityName)
@@ -663,34 +663,13 @@ async function executeCommand() {
       return
     }
 
-    const field = remainder[0]
-    const operator = remainder[1]
-    const value = remainder.slice(2).join(' ')
-
-    if (!field || !operator) {
-      addHistoryLine('>', 'Filter requires field, operator, and value')
+    const parseResult = parseChainedConditions(entityName, remainderText)
+    if (parseResult.error) {
+      addHistoryLine('>', parseResult.error)
       return
     }
-    if (!OPERATORS.includes(operator)) {
-      addHistoryLine('>', `Operator must be one of: ${OPERATORS.join(', ')}`)
-      return
-    }
-    const allowedOperators = getAllowedOperators(entityName, field)
-    if (!allowedOperators.includes(operator)) {
-      addHistoryLine('>', `Operator "${operator}" is not supported for ${field}`)
-      return
-    }
-    if (!value && !isOperatorWithoutValue(operator)) {
-      addHistoryLine('>', 'Filter value cannot be empty (except for not_empty/empty)')
-      return
-    }
-
-    const normalizedValue = normalizeFilterValue(entityName, field, operator, value)
-    if (normalizedValue === undefined) {
-      addHistoryLine('>', 'Invalid filter value')
-      return
-    }
-    runAdhocFilterCommand(entityName, field, operator, normalizedValue)
+    const filterExpression = buildFilterExpression(parseResult.filters)
+    runAdhocFilterCommand(entityName, filterExpression)
     return
   }
 
@@ -754,12 +733,10 @@ async function runStoredFilterCommand(entityName, filterDef) {
   }
 }
 
-async function runAdhocFilterCommand(entityName, field, operator, value) {
+async function runAdhocFilterCommand(entityName, filterExpression) {
   addHistoryLine('>', 'Running filter...')
   const payload = {
-    filters: [
-      { field, operator, value }
-    ],
+    ...filterExpression,
     limit: listLimit.value,
     page: 1
   }
@@ -833,11 +810,14 @@ function scheduleLiveQueries() {
       return
     }
 
-    const fieldToken = tokens[2] || ''
-    const operatorToken = tokens[3] || ''
+    const remainderText = tokens.slice(2).join(' ').trim()
+    if (!remainderText) {
+      if (resultsSource.value === 'live-filter') clearResults()
+      return
+    }
 
-    if (fieldToken.startsWith('?')) {
-      const filterDef = getStoredFilterByName(entityName, fieldToken.replace('?', ''))
+    if (remainderText.startsWith('?')) {
+      const filterDef = getStoredFilterByName(entityName, remainderText.replace('?', ''))
       if (filterDef) {
         liveFilterTimeout = setTimeout(
             () => runLiveStoredFilter(entityName, filterDef),
@@ -849,35 +829,34 @@ function scheduleLiveQueries() {
       return
     }
 
-    const valueToken = tokens.slice(4).join(' ')
-    const hasValue = valueToken || isOperatorWithoutValue(operatorToken)
-    const allowedOperators = getAllowedOperators(entityName, fieldToken)
-
-    if (fieldToken && operatorToken && OPERATORS.includes(operatorToken) && hasValue && allowedOperators.includes(operatorToken)) {
-      if (shouldDeferRelationshipLiveFilter(entityName, fieldToken, operatorToken, valueToken)) {
-        if (resultsSource.value === 'live-filter') clearResults()
-        return
-      }
-      const normalizedValue = normalizeFilterValue(entityName, fieldToken, operatorToken, valueToken)
-      if (normalizedValue === undefined) {
-        if (resultsSource.value === 'live-filter') clearResults()
-        return
-      }
-      const payload = {
-        filters: [
-          { field: fieldToken, operator: operatorToken, value: normalizedValue }
-        ],
-        limit: listLimit.value,
-        page: 1
-      }
-      liveFilterTimeout = setTimeout(
-          () => runLiveAdhocFilter(entityName, payload),
-          LIVE_FILTER_DEBOUNCE
-      )
-    } else if (resultsSource.value === 'live-filter') {
-      clearResults()
+    const parseResult = parseChainedConditions(entityName, remainderText)
+    if (parseResult.error || !parseResult.filters.length) {
+      if (resultsSource.value === 'live-filter') clearResults()
+      return
     }
+
+    const shouldDefer = parseResult.filters.some(filter =>
+      shouldDeferRelationshipLiveFilter(entityName, filter.field, filter.operator, filter.rawValue ?? '')
+    )
+    if (shouldDefer) {
+      if (resultsSource.value === 'live-filter') clearResults()
+      return
+    }
+
+    const payload = {
+      ...buildFilterExpression(parseResult.filters),
+      limit: listLimit.value,
+      page: 1
+    }
+    liveFilterTimeout = setTimeout(
+        () => runLiveAdhocFilter(entityName, payload),
+        LIVE_FILTER_DEBOUNCE
+    )
     return
+  }
+
+  if (resultsSource.value === 'live-filter') {
+      clearResults()
   }
 
   clearLiveResults()
@@ -992,7 +971,10 @@ function loadCommandHistory() {
 function printHelp() {
   addHistoryLine('>', 'Available commands:')
   addHistoryLine('>', 'search [entity] [query]')
-  addHistoryLine('>', 'filter [entity] [field operator value]')
+  addHistoryLine('>', 'filter [entity] [field operator value; field operator value]')
+  addHistoryLine('>', 'Use ";" to chain multiple AND conditions')
+  addHistoryLine('>', 'OR/parentheses are not supported in the console yet')
+  addHistoryLine('>', 'Use a stored filter if you need OR logic')
   addHistoryLine('>', 'filter [entity] ?[stored filter name]')
   addHistoryLine('>', 'new [entity]')
   addHistoryLine('>', 'help')
@@ -1100,6 +1082,64 @@ function normalizeFilterValue(entityName, fieldName, operator, rawValue) {
   }
 
   return value
+}
+
+function parseChainedConditions(entityName, rawText) {
+  const segments = (rawText || '')
+    .split(';')
+    .map(segment => segment.trim())
+    .filter(Boolean)
+
+  if (!segments.length) {
+    return { filters: [], error: 'Filter requires field, operator, and value' }
+  }
+
+  const filters = []
+  for (const segment of segments) {
+    const parts = segment.split(' ').filter(Boolean)
+    const field = parts[0]
+    const operator = parts[1]
+    const value = parts.slice(2).join(' ')
+
+    if (!field || !operator) {
+      return { filters: [], error: 'Filter requires field, operator, and value' }
+    }
+    if (!OPERATORS.includes(operator)) {
+      return { filters: [], error: `Operator must be one of: ${OPERATORS.join(', ')}` }
+    }
+    const allowedOperators = getAllowedOperators(entityName, field)
+    if (!allowedOperators.includes(operator)) {
+      return { filters: [], error: `Operator "${operator}" is not supported for ${field}` }
+    }
+    if (!value && !isOperatorWithoutValue(operator)) {
+      return { filters: [], error: 'Filter value cannot be empty (except for not_empty/empty)' }
+    }
+
+    const normalizedValue = normalizeFilterValue(entityName, field, operator, value)
+    if (normalizedValue === undefined) {
+      return { filters: [], error: 'Invalid filter value' }
+    }
+
+    filters.push({
+      field,
+      operator,
+      value: normalizedValue,
+      rawValue: value
+    })
+  }
+
+  return { filters }
+}
+
+function buildFilterExpression(filters) {
+  return {
+    group: 'AND',
+    filters: (filters || []).map(filter => ({
+      field: filter.field,
+      operator: filter.operator,
+      value: filter.value
+    }))
+  }
 }
 
 function normalizeSelectOptions(options) {

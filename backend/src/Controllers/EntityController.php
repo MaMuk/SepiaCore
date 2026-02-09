@@ -230,7 +230,15 @@ class EntityController extends BaseController
         $payload = $request->data->getData();
 
         $filterId = $payload['filter_id'] ?? ($request->query['filter_id'] ?? null);
-        $filters = $payload['filters'] ?? [];
+        $filterExpression = null;
+        if (array_key_exists('group', $payload) && array_key_exists('filters', $payload)) {
+            $filterExpression = [
+                'group' => $payload['group'],
+                'filters' => $payload['filters'],
+            ];
+        } elseif (array_key_exists('filters', $payload)) {
+            $filterExpression = $payload['filters'];
+        }
         $storedFilter = null;
 
         if ($filterId !== null && $filterId !== '') {
@@ -238,19 +246,19 @@ class EntityController extends BaseController
             if (!$storedFilter) {
                 $this->jsonHalt(['error' => "Stored filter '$filterId' not found"], 404);
             }
-            if (empty($filters)) {
-                $filters = $storedFilter['filters'] ?? [];
+            if ($filterExpression === null || $filterExpression === []) {
+                $filterExpression = $storedFilter['definition'] ?? null;
             }
         }
 
-        $normalizedFilters = $this->normalizeFilters($filters);
-        if (empty($normalizedFilters)) {
+        $normalizedExpression = $this->normalizeFilterExpression($filterExpression);
+        if (!$normalizedExpression) {
             $this->jsonHalt(['error' => 'No filters provided'], 400);
         }
 
-        $this->validateFilters($normalizedFilters);
+        $this->validateFilterExpression($normalizedExpression);
 
-        $result = $this->runFilterScan($normalizedFilters, $params, $payload);
+        $result = $this->runFilterScan($normalizedExpression, $params, $payload);
         $response = [
             'records' => $this->sanitizeFilterRecords($result['records']),
             'total' => $result['total'],
@@ -318,16 +326,15 @@ class EntityController extends BaseController
             return null;
         }
 
-        $filters = $definition['filters'] ?? null;
-        $normalizedFilters = $this->normalizeFilters($filters);
-        if (empty($normalizedFilters)) {
+        $normalizedDefinition = $this->normalizeFilterExpression($definition);
+        if (!$normalizedDefinition) {
             return null;
         }
 
         return [
             'id' => $record['id'],
             'name' => $record['name'] ?? 'Saved filter',
-            'filters' => $normalizedFilters,
+            'definition' => $normalizedDefinition,
         ];
     }
 
@@ -378,7 +385,104 @@ class EntityController extends BaseController
     }
 
     /**
-     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @param mixed $filters
+     * @return array{group: string, filters: array<int, array<string, mixed>>}|null
+     */
+    protected function normalizeFilterExpression($filters): ?array
+    {
+        if (!is_array($filters)) {
+            return null;
+        }
+
+        if (array_key_exists('filters', $filters) && !array_key_exists('group', $filters)) {
+            return $this->normalizeFilterExpression($filters['filters']);
+        }
+
+        if (array_key_exists('group', $filters) && array_key_exists('filters', $filters)) {
+            $group = strtoupper((string) $filters['group']);
+            $children = $filters['filters'];
+            if (!is_array($children)) {
+                return null;
+            }
+
+            $normalizedChildren = [];
+            foreach ($children as $child) {
+                $normalizedChild = $this->normalizeFilterExpressionChild($child);
+                if ($normalizedChild !== null) {
+                    $normalizedChildren[] = $normalizedChild;
+                }
+            }
+
+            if (empty($normalizedChildren)) {
+                return null;
+            }
+
+            return [
+                'group' => $group,
+                'filters' => $normalizedChildren,
+            ];
+        }
+
+        $keys = array_keys($filters);
+        $isAssoc = $keys !== range(0, count($keys) - 1);
+
+        if ($isAssoc) {
+            $normalizedFilters = $this->normalizeFilters($filters);
+            if (empty($normalizedFilters)) {
+                return null;
+            }
+            return [
+                'group' => 'AND',
+                'filters' => $normalizedFilters,
+            ];
+        }
+
+        $normalizedChildren = [];
+        foreach ($filters as $child) {
+            $normalizedChild = $this->normalizeFilterExpressionChild($child);
+            if ($normalizedChild !== null) {
+                $normalizedChildren[] = $normalizedChild;
+            }
+        }
+
+        if (empty($normalizedChildren)) {
+            return null;
+        }
+
+        return [
+            'group' => 'AND',
+            'filters' => $normalizedChildren,
+        ];
+    }
+
+    /**
+     * @param mixed $child
+     * @return array<string, mixed>|null
+     */
+    protected function normalizeFilterExpressionChild($child): ?array
+    {
+        if (!is_array($child)) {
+            return null;
+        }
+
+        if (array_key_exists('group', $child) && array_key_exists('filters', $child)) {
+            return $this->normalizeFilterExpression($child);
+        }
+
+        $field = $child['field'] ?? null;
+        if (!$field) {
+            return null;
+        }
+
+        return [
+            'field' => $field,
+            'operator' => $child['operator'] ?? 'eq',
+            'value' => $child['value'] ?? null,
+        ];
+    }
+
+    /**
+     * @param array{group: string, filters: array<int, array<string, mixed>>} $filters
      * @param array $params
      * @param array $payload
      * @return array{records: array, total: int}
@@ -428,116 +532,29 @@ class EntityController extends BaseController
 
     /**
      * @param array $record
-     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @param array{group: string, filters: array<int, array<string, mixed>>} $filters
      * @return bool
      */
     protected function recordMatchesFilters(array $record, array $filters): bool
     {
-        foreach ($filters as $filter) {
-            $field = $filter['field'] ?? null;
-            if (!$field) {
-                continue;
+        $group = strtoupper((string) ($filters['group'] ?? 'AND'));
+        $children = $filters['filters'] ?? [];
+        if (!is_array($children) || empty($children)) {
+            return false;
+        }
+
+        if ($group === 'OR') {
+            foreach ($children as $child) {
+                if ($this->recordMatchesFilterNode($record, $child)) {
+                    return true;
+                }
             }
+            return false;
+        }
 
-            $operator = strtolower($filter['operator'] ?? 'eq');
-            $expected = $filter['value'] ?? null;
-            $actual = $record[$field] ?? null;
-            $fieldType = $this->getFieldType($field);
-
-            if (!in_array($operator, ['not_empty', 'empty'], true) && !$this->isOperatorAllowedForType($operator, $fieldType)) {
+        foreach ($children as $child) {
+            if (!$this->recordMatchesFilterNode($record, $child)) {
                 return false;
-            }
-
-            switch ($operator) {
-                case 'contains':
-                    if ($actual === null) {
-                        return false;
-                    }
-                    if (stripos((string) $actual, (string) $expected) === false) {
-                        return false;
-                    }
-                    break;
-                case 'starts_with':
-                    if ($actual === null) {
-                        return false;
-                    }
-                    $actualString = (string) $actual;
-                    $expectedString = (string) $expected;
-                    if (stripos($actualString, $expectedString) !== 0) {
-                        return false;
-                    }
-                    break;
-                case 'ends_with':
-                    if ($actual === null) {
-                        return false;
-                    }
-                    $actualString = (string) $actual;
-                    $expectedString = (string) $expected;
-                    if ($expectedString === '' || strcasecmp(substr($actualString, -strlen($expectedString)), $expectedString) !== 0) {
-                        return false;
-                    }
-                    break;
-                case 'in':
-                    $list = $this->normalizeListValue($expected);
-                    if (in_array($fieldType, ['select', 'relationship'], true)) {
-                        $actualValue = $actual === null ? null : (string) $actual;
-                        $list = array_map('strval', $list);
-                        if (!in_array($actualValue, $list, true)) {
-                            return false;
-                        }
-                        break;
-                    }
-                    if (!in_array($actual, $list, false)) {
-                        return false;
-                    }
-                    break;
-                case 'gt':
-                    if ($this->compareComparable($actual, $expected, $fieldType, 'gt') === false) {
-                        return false;
-                    }
-                    break;
-                case 'gte':
-                    if ($this->compareComparable($actual, $expected, $fieldType, 'gte') === false) {
-                        return false;
-                    }
-                    break;
-                case 'lt':
-                    if ($this->compareComparable($actual, $expected, $fieldType, 'lt') === false) {
-                        return false;
-                    }
-                    break;
-                case 'lte':
-                    if ($this->compareComparable($actual, $expected, $fieldType, 'lte') === false) {
-                        return false;
-                    }
-                    break;
-                case 'not_empty':
-                    if ($actual === null || $actual === '') {
-                        return false;
-                    }
-                    break;
-                case 'empty':
-                    if (in_array($fieldType, ['boolean', 'checkbox'], true)) {
-                        $actualBool = $this->normalizeBoolean($actual);
-                        return $actualBool === false;
-                    }
-                    if ($actual !== null && $actual !== '') {
-                        if (is_array($actual) && count($actual) === 0) {
-                            break;
-                        }
-                        return false;
-                    }
-                    break;
-                case 'eq':
-                    if (!$this->matchesEquality($actual, $expected, $fieldType)) {
-                        return false;
-                    }
-                    break;
-                default:
-                    if (!$this->matchesEquality($actual, $expected, $fieldType)) {
-                        return false;
-                    }
-                    break;
             }
         }
 
@@ -545,27 +562,179 @@ class EntityController extends BaseController
     }
 
     /**
-     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @param array{group: string, filters: array<int, array<string, mixed>>} $filters
      * @return void
      */
-    protected function validateFilters(array $filters): void
+    protected function validateFilterExpression(array $filters): void
     {
-        foreach ($filters as $filter) {
-            $field = $filter['field'] ?? null;
-            if (!$field) {
-                continue;
-            }
-            $operator = strtolower($filter['operator'] ?? 'eq');
-            $fieldType = $this->getFieldType($field);
-            if (!$fieldType || in_array($operator, ['not_empty', 'empty'], true)) {
-                continue;
-            }
-            if (!$this->isOperatorAllowedForType($operator, $fieldType)) {
-                $this->jsonHalt([
-                    'error' => "Operator '{$operator}' is not supported for '{$field}' ({$fieldType})"
-                ], 400);
-            }
+        $group = strtoupper((string) ($filters['group'] ?? ''));
+        if (!in_array($group, ['AND', 'OR'], true)) {
+            $this->jsonHalt(['error' => "Filter group '{$group}' is not supported"], 400);
         }
+
+        $children = $filters['filters'] ?? null;
+        if (!is_array($children) || empty($children)) {
+            $this->jsonHalt(['error' => 'No filters provided'], 400);
+        }
+
+        foreach ($children as $child) {
+            $this->validateFilterNode($child);
+        }
+    }
+
+    /**
+     * @param mixed $node
+     * @return void
+     */
+    protected function validateFilterNode($node): void
+    {
+        if (!is_array($node)) {
+            return;
+        }
+
+        if (array_key_exists('group', $node) && array_key_exists('filters', $node)) {
+            $this->validateFilterExpression($node);
+            return;
+        }
+
+        $field = $node['field'] ?? null;
+        if (!$field) {
+            return;
+        }
+        $operator = strtolower($node['operator'] ?? 'eq');
+        $fieldType = $this->getFieldType($field);
+        if (!$fieldType || in_array($operator, ['not_empty', 'empty'], true)) {
+            return;
+        }
+        if (!$this->isOperatorAllowedForType($operator, $fieldType)) {
+            $this->jsonHalt([
+                'error' => "Operator '{$operator}' is not supported for '{$field}' ({$fieldType})"
+            ], 400);
+        }
+    }
+
+    /**
+     * @param array $record
+     * @param mixed $node
+     * @return bool
+     */
+    protected function recordMatchesFilterNode(array $record, $node): bool
+    {
+        if (!is_array($node)) {
+            return false;
+        }
+
+        if (array_key_exists('group', $node) && array_key_exists('filters', $node)) {
+            return $this->recordMatchesFilters($record, $node);
+        }
+
+        $field = $node['field'] ?? null;
+        if (!$field) {
+            return true;
+        }
+
+        $operator = strtolower($node['operator'] ?? 'eq');
+        $expected = $node['value'] ?? null;
+        $actual = $record[$field] ?? null;
+        $fieldType = $this->getFieldType($field);
+
+        if (!in_array($operator, ['not_empty', 'empty'], true) && !$this->isOperatorAllowedForType($operator, $fieldType)) {
+            return false;
+        }
+
+        switch ($operator) {
+            case 'contains':
+                if ($actual === null) {
+                    return false;
+                }
+                if (stripos((string) $actual, (string) $expected) === false) {
+                    return false;
+                }
+                break;
+            case 'starts_with':
+                if ($actual === null) {
+                    return false;
+                }
+                $actualString = (string) $actual;
+                $expectedString = (string) $expected;
+                if (stripos($actualString, $expectedString) !== 0) {
+                    return false;
+                }
+                break;
+            case 'ends_with':
+                if ($actual === null) {
+                    return false;
+                }
+                $actualString = (string) $actual;
+                $expectedString = (string) $expected;
+                if ($expectedString === '' || strcasecmp(substr($actualString, -strlen($expectedString)), $expectedString) !== 0) {
+                    return false;
+                }
+                break;
+            case 'in':
+                $list = $this->normalizeListValue($expected);
+                if (in_array($fieldType, ['select', 'relationship'], true)) {
+                    $actualValue = $actual === null ? null : (string) $actual;
+                    $list = array_map('strval', $list);
+                    if (!in_array($actualValue, $list, true)) {
+                        return false;
+                    }
+                    break;
+                }
+                if (!in_array($actual, $list, false)) {
+                    return false;
+                }
+                break;
+            case 'gt':
+                if ($this->compareComparable($actual, $expected, $fieldType, 'gt') === false) {
+                    return false;
+                }
+                break;
+            case 'gte':
+                if ($this->compareComparable($actual, $expected, $fieldType, 'gte') === false) {
+                    return false;
+                }
+                break;
+            case 'lt':
+                if ($this->compareComparable($actual, $expected, $fieldType, 'lt') === false) {
+                    return false;
+                }
+                break;
+            case 'lte':
+                if ($this->compareComparable($actual, $expected, $fieldType, 'lte') === false) {
+                    return false;
+                }
+                break;
+            case 'not_empty':
+                if ($actual === null || $actual === '') {
+                    return false;
+                }
+                break;
+            case 'empty':
+                if (in_array($fieldType, ['boolean', 'checkbox'], true)) {
+                    $actualBool = $this->normalizeBoolean($actual);
+                    return $actualBool === false;
+                }
+                if ($actual !== null && $actual !== '') {
+                    if (is_array($actual) && count($actual) === 0) {
+                        break;
+                    }
+                    return false;
+                }
+                break;
+            case 'eq':
+                if (!$this->matchesEquality($actual, $expected, $fieldType)) {
+                    return false;
+                }
+                break;
+            default:
+                if (!$this->matchesEquality($actual, $expected, $fieldType)) {
+                    return false;
+                }
+                break;
+        }
+
+        return true;
     }
 
     protected function getFieldType(string $field): ?string

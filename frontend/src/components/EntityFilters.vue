@@ -27,89 +27,59 @@
       </div>
 
       <div v-if="mode === 'builder'" class="filter-builder">
-        <div v-if="fieldOptions.length" class="row g-2 align-items-end">
-          <div class="col-12 col-md-4">
-            <label class="form-label small text-muted">Field</label>
-            <select v-model="builderField" class="form-select form-select-sm">
-              <option value="">Select field</option>
-              <option v-for="field in fieldOptions" :key="field.value" :value="field.value">
-                {{ field.label }}
-              </option>
-            </select>
-          </div>
-          <div class="col-12 col-md-3">
-            <label class="form-label small text-muted">Operator</label>
-            <select v-model="builderOperator" class="form-select form-select-sm">
-              <option v-for="op in operatorOptions" :key="op.value" :value="op.value">
-                {{ op.label }}
-              </option>
-            </select>
-          </div>
-          <div v-if="showValueInput" class="col-12 col-md-5">
-            <label class="form-label small text-muted">Value</label>
-            <select
-              v-if="isBooleanField"
-              v-model="builderValue"
-              class="form-select form-select-sm"
+        <div v-if="fieldOptions.length" class="d-flex flex-wrap align-items-center gap-2">
+          <div class="btn-group btn-group-sm" role="group" aria-label="Filter group">
+            <button
+              type="button"
+              class="btn"
+              :class="builderGroup.group === 'AND' ? 'btn-primary' : 'btn-outline-primary'"
+              @click="setGroupOperator('AND')"
             >
-              <option value="">Select value</option>
-              <option :value="true">True</option>
-              <option :value="false">False</option>
-            </select>
-            <select
-              v-else-if="isSelectField && builderOperator === 'in'"
-              v-model="builderValue"
-              class="form-select form-select-sm"
-              multiple
+              AND
+            </button>
+            <button
+              type="button"
+              class="btn"
+              :class="builderGroup.group === 'OR' ? 'btn-primary' : 'btn-outline-primary'"
+              @click="setGroupOperator('OR')"
             >
-              <option v-for="option in selectedFieldOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <select
-              v-else-if="isSelectField"
-              v-model="builderValue"
-              class="form-select form-select-sm"
-            >
-              <option value="">Select value</option>
-              <option v-for="option in selectedFieldOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <input
-              v-else-if="isDateField"
-              v-model="builderValue"
-              type="date"
-              class="form-control form-control-sm"
-            />
-            <input
-              v-else-if="isDatetimeField"
-              v-model="builderValue"
-              type="datetime-local"
-              class="form-control form-control-sm"
-            />
-            <RelationshipSearchSelect
-              v-else-if="isRelationshipField && hasRelationshipEntity"
-              v-model="builderValue"
-              :related-entity="selectedField?.entity"
-              :reset-key="relationshipResetKey"
-              placeholder="Search related records"
-              @select="handleRelationshipSelect"
-              @cleared="handleRelationshipClear"
-            />
-            <input
-              v-else
-              v-model="builderValue"
-              type="text"
-              class="form-control form-control-sm"
-              placeholder="Enter value"
-            />
+              OR
+            </button>
           </div>
+          <button
+            class="btn btn-outline-primary btn-sm"
+            type="button"
+            @click="openAddCondition"
+          >
+            <i class="bi bi-plus-circle me-1"></i>
+            Add condition
+          </button>
         </div>
         <div v-else class="text-muted small">No fields available for this entity.</div>
 
-        <div class="d-flex align-items-center mt-2">
-          <small v-if="!builderReady" class="text-muted">Set a field, operator, and value to apply.</small>
+        <div v-if="builderGroup.filters.length" class="chip-row mt-2">
+          <div
+            v-for="(condition, index) in builderGroup.filters"
+            :key="`condition-${index}`"
+            class="filter-chip"
+          >
+            <button class="chip-button" type="button" @click="openEditCondition(index)">
+              {{ getConditionLabel(condition) }}
+            </button>
+            <button
+              class="chip-remove"
+              type="button"
+              aria-label="Remove condition"
+              @click.stop="removeCondition(index)"
+            >
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+        </div>
+        <div v-else class="text-muted small mt-2">No conditions yet.</div>
+
+        <div class="d-flex align-items-center mt-3">
+          <small v-if="!builderReady" class="text-muted">Add at least one condition to apply.</small>
           <button
             v-if="!editMode"
             class="btn btn-outline-primary btn-sm ms-auto"
@@ -174,6 +144,15 @@
             Cancel
           </button>
         </div>
+
+        <FilterConditionModal
+          v-model="conditionModalOpen"
+          :fields="fields"
+          :condition="modalCondition"
+          :mode="conditionModalMode"
+          @save="handleConditionSave"
+          @cancel="handleConditionCancel"
+        />
       </div>
 
       <div v-else class="filter-stored">
@@ -245,7 +224,7 @@
 
 <script setup>
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
-import RelationshipSearchSelect from './RelationshipSearchSelect.vue'
+import FilterConditionModal from './FilterConditionModal.vue'
 import entityService from '../services/entityService'
 
 const props = defineProps({
@@ -276,11 +255,11 @@ const emit = defineEmits(['filter-change'])
 const isOpen = ref(false)
 const mode = ref(props.requireStored ? 'stored' : 'builder')
 
-const builderField = ref('')
-const builderOperator = ref('contains')
-const builderValue = ref('')
-const relationshipLabel = ref('')
-const relationshipResetKey = ref(0)
+const builderGroup = ref({ group: 'AND', filters: [] })
+const conditionModalOpen = ref(false)
+const conditionModalMode = ref('create')
+const modalCondition = ref(null)
+const editingIndex = ref(null)
 
 const storedQuery = ref('')
 const selectedStoredId = ref(null)
@@ -313,28 +292,6 @@ const operatorLabelMap = {
   in: 'In'
 }
 
-const defaultOperatorOrder = [
-  'eq',
-  'contains',
-  'starts_with',
-  'ends_with',
-  'not_empty',
-  'empty',
-  'gt',
-  'gte',
-  'lt',
-  'lte'
-]
-
-const operatorSetsByType = {
-  boolean: ['eq'],
-  checkbox: ['eq'],
-  select: ['eq', 'in', 'not_empty', 'empty'],
-  date: ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty', 'empty'],
-  datetime: ['eq', 'gt', 'gte', 'lt', 'lte', 'not_empty', 'empty'],
-  relationship: ['eq', 'not_empty', 'empty']
-}
-
 const fieldOptions = computed(() => {
   return (props.fields || [])
     .map(field => ({
@@ -347,65 +304,15 @@ const fieldOptions = computed(() => {
     .filter(field => field.value)
 })
 
-const selectedField = computed(() => {
-  return fieldOptions.value.find(field => field.value === builderField.value) || null
+const fieldOptionMap = computed(() => {
+  const map = {}
+  fieldOptions.value.forEach(field => {
+    map[field.value] = field
+  })
+  return map
 })
 
-const selectedFieldType = computed(() => selectedField.value?.type || 'text')
-
-const selectedFieldOptions = computed(() => {
-  const options = selectedField.value?.options
-  if (!options) return []
-  if (Array.isArray(options)) {
-    return options.map(option => ({
-      value: option,
-      label: String(option)
-    }))
-  }
-  return Object.entries(options).map(([value, label]) => ({
-    value,
-    label: String(label)
-  }))
-})
-
-const operatorOptions = computed(() => {
-  const fieldType = selectedFieldType.value
-  const allowed = operatorSetsByType[fieldType] || defaultOperatorOrder
-  return allowed.map(value => ({
-    value,
-    label: operatorLabelMap[value] || value
-  }))
-})
-
-const isBooleanField = computed(() => ['boolean', 'checkbox'].includes(selectedFieldType.value))
-const isSelectField = computed(() => selectedFieldType.value === 'select')
-const isDateField = computed(() => selectedFieldType.value === 'date')
-const isDatetimeField = computed(() => selectedFieldType.value === 'datetime')
-const isRelationshipField = computed(() => selectedFieldType.value === 'relationship')
-const hasRelationshipEntity = computed(() => !!selectedField.value?.entity)
-
-const showValueInput = computed(() => !['not_empty', 'empty'].includes(builderOperator.value))
-
-const builderReady = computed(() => {
-  if (!builderField.value || !builderOperator.value) return false
-  if (['not_empty', 'empty'].includes(builderOperator.value)) return true
-  if (isSelectField.value && builderOperator.value === 'in') {
-    return Array.isArray(builderValue.value) && builderValue.value.length > 0
-  }
-  if (isBooleanField.value) {
-    return builderValue.value === true || builderValue.value === false
-  }
-  if (builderValue.value === null || builderValue.value === undefined) return false
-  if (typeof builderValue.value === 'string') {
-    return builderValue.value.trim() !== ''
-  }
-  return true
-})
-
-const builderFieldLabel = computed(() => {
-  const match = fieldOptions.value.find(field => field.value === builderField.value)
-  return match?.label || builderField.value
-})
+const builderReady = computed(() => getValidConditions().length > 0)
 
 const filteredStoredFilters = computed(() => {
   const needle = storedQuery.value.trim().toLowerCase()
@@ -426,7 +333,8 @@ function scheduleBuilderEmit() {
   emitTimeout = setTimeout(() => {
     if (props.requireStored) return
     if (mode.value !== 'builder') return
-    if (!builderReady.value) {
+    const conditions = getValidConditions()
+    if (!conditions.length) {
       if (activeMode.value === 'builder') {
         activeMode.value = null
         activeLabel.value = ''
@@ -435,26 +343,8 @@ function scheduleBuilderEmit() {
       return
     }
 
-    const filterValue = normalizeFilterValue()
-    const payload = {
-      filters: [
-        {
-          field: builderField.value,
-          operator: builderOperator.value,
-          value: filterValue
-        }
-      ]
-    }
-
-    const labelValueText = builderOperator.value === 'not_empty'
-      ? ''
-      : formatValueLabel(filterValue)
-
-    const labelValue = builderOperator.value === 'not_empty'
-      ? `${builderFieldLabel.value} is not empty`
-      : builderOperator.value === 'empty'
-        ? `${builderFieldLabel.value} is empty`
-      : `${builderFieldLabel.value} ${operatorLabelMap[builderOperator.value] || builderOperator.value} ${labelValueText}`
+    const payload = buildPayloadFromConditions(conditions)
+    const labelValue = buildGroupLabel(conditions)
 
     activeMode.value = 'builder'
     activeLabel.value = labelValue
@@ -474,8 +364,10 @@ function selectStoredFilter(filter) {
 }
 
 function clearFilter() {
-  builderValue.value = ''
-  relationshipLabel.value = ''
+  builderGroup.value = { group: 'AND', filters: [] }
+  conditionModalOpen.value = false
+  modalCondition.value = null
+  editingIndex.value = null
   selectedStoredId.value = null
   activeMode.value = null
   activeLabel.value = ''
@@ -488,10 +380,10 @@ function clearFilter() {
 }
 
 function resetState() {
-  builderField.value = ''
-  builderOperator.value = 'contains'
-  builderValue.value = ''
-  relationshipLabel.value = ''
+  builderGroup.value = { group: 'AND', filters: [] }
+  conditionModalOpen.value = false
+  modalCondition.value = null
+  editingIndex.value = null
   storedQuery.value = ''
   selectedStoredId.value = null
   activeMode.value = null
@@ -503,45 +395,11 @@ function resetState() {
   editName.value = ''
 }
 
-watch(fieldOptions, (next) => {
-  if (!builderField.value && next.length) {
-    builderField.value = next[0].value
-  }
-}, { immediate: true })
-
-watch(selectedFieldType, () => {
-  const nextOperators = operatorOptions.value
-  if (!nextOperators.find(op => op.value === builderOperator.value)) {
-    builderOperator.value = nextOperators[0]?.value || 'eq'
-  }
-  builderValue.value = ''
-  relationshipLabel.value = ''
-  relationshipResetKey.value += 1
-})
-
-watch(builderOperator, (next, prev) => {
-  if (isSelectField.value && next === 'in') {
-    builderValue.value = Array.isArray(builderValue.value)
-      ? builderValue.value
-      : (builderValue.value ? [builderValue.value] : [])
-  } else if (isSelectField.value && prev === 'in' && next !== 'in') {
-    builderValue.value = Array.isArray(builderValue.value)
-      ? (builderValue.value[0] ?? '')
-      : builderValue.value
-  }
-  if (next === 'not_empty') {
-    relationshipLabel.value = ''
-  }
-  if (next === 'empty') {
-    relationshipLabel.value = ''
-  }
-})
-
-watch([builderField, builderOperator, builderValue], () => {
+watch(builderGroup, () => {
   if (mode.value === 'builder') {
     scheduleBuilderEmit()
   }
-})
+}, { deep: true })
 
 watch(mode, (next) => {
   if (next === 'builder') {
@@ -608,62 +466,208 @@ onMounted(() => {
   loadStoredFilters()
 })
 
-function normalizeFilterValue() {
-  if (['not_empty', 'empty'].includes(builderOperator.value)) return null
-
-  if (isBooleanField.value) {
-    if (builderValue.value === true || builderValue.value === false) {
-      return builderValue.value
-    }
-    if (builderValue.value === 'true') return true
-    if (builderValue.value === 'false') return false
-    return null
+function setGroupOperator(nextGroup) {
+  const normalized = String(nextGroup || '').toUpperCase() === 'OR' ? 'OR' : 'AND'
+  builderGroup.value = {
+    ...builderGroup.value,
+    group: normalized
   }
-
-  if (isSelectField.value && builderOperator.value === 'in') {
-    return Array.isArray(builderValue.value)
-      ? builderValue.value.filter(value => value !== '')
-      : []
-  }
-
-  if (builderValue.value === null || builderValue.value === undefined) return null
-  if (typeof builderValue.value === 'string') {
-    const trimmed = builderValue.value.trim()
-    return trimmed === '' ? null : trimmed
-  }
-
-  return builderValue.value
 }
 
-function formatValueLabel(filterValue) {
-  if (isBooleanField.value) {
-    return filterValue ? 'True' : 'False'
+function openAddCondition() {
+  conditionModalMode.value = 'create'
+  editingIndex.value = null
+  modalCondition.value = null
+  conditionModalOpen.value = true
+}
+
+function openEditCondition(index) {
+  const current = builderGroup.value.filters[index]
+  if (!current) return
+  conditionModalMode.value = 'edit'
+  editingIndex.value = index
+  modalCondition.value = { ...current }
+  conditionModalOpen.value = true
+}
+
+function handleConditionSave(condition) {
+  if (!condition) return
+  const nextCondition = { ...condition }
+  if (editingIndex.value !== null && editingIndex.value !== undefined) {
+    builderGroup.value.filters.splice(editingIndex.value, 1, nextCondition)
+  } else {
+    builderGroup.value.filters.push(nextCondition)
+  }
+  modalCondition.value = null
+  editingIndex.value = null
+}
+
+function handleConditionCancel() {
+  modalCondition.value = null
+  editingIndex.value = null
+}
+
+function removeCondition(index) {
+  builderGroup.value.filters.splice(index, 1)
+}
+
+function getValidConditions() {
+  return (builderGroup.value.filters || []).filter(condition => isConditionValid(condition))
+}
+
+function isConditionValid(condition) {
+  if (!condition?.field || !condition?.operator) return false
+  const operator = condition.operator
+  if (operator === 'not_empty' || operator === 'empty') return true
+  const fieldType = fieldOptionMap.value[condition.field]?.type || 'text'
+  if (fieldType === 'boolean' || fieldType === 'checkbox') {
+    if (condition.value === true || condition.value === false) return true
+    if (['true', 'false', '1', '0', 1, 0].includes(condition.value)) return true
+    return false
+  }
+  if (Array.isArray(condition.value)) {
+    return condition.value.length > 0
+  }
+  if (condition.value === null || condition.value === undefined) return false
+  if (typeof condition.value === 'string') {
+    return condition.value.trim() !== ''
+  }
+  return true
+}
+
+function buildPayloadFromConditions(conditions) {
+  const group = builderGroup.value.group === 'OR' ? 'OR' : 'AND'
+  return {
+    group,
+    filters: conditions.map(condition => ({
+      field: condition.field,
+      operator: condition.operator,
+      value: condition.value ?? null
+    }))
+  }
+}
+
+function buildGroupLabel(conditions) {
+  const labels = conditions.map(condition => getConditionLabel(condition)).filter(Boolean)
+  if (!labels.length) return ''
+  const joiner = builderGroup.value.group === 'OR' ? ' OR ' : ' AND '
+  return labels.join(joiner)
+}
+
+function getConditionLabel(condition) {
+  const fieldLabel = getFieldLabel(condition?.field)
+  const operator = condition?.operator || 'eq'
+  if (operator === 'not_empty') return `${fieldLabel} is not empty`
+  if (operator === 'empty') return `${fieldLabel} is empty`
+  const valueLabel = formatConditionValueLabel(condition)
+  const operatorLabel = operatorLabelMap[operator] || operator
+  return `${fieldLabel} ${operatorLabel} ${valueLabel}`
+}
+
+function getFieldLabel(fieldName) {
+  const field = fieldOptionMap.value[fieldName]
+  return field?.label || fieldName || 'Field'
+}
+
+function formatConditionValueLabel(condition) {
+  const field = fieldOptionMap.value[condition?.field]
+  const fieldType = field?.type || 'text'
+  const operator = condition?.operator || 'eq'
+  const value = condition?.value
+
+  if (fieldType === 'boolean' || fieldType === 'checkbox') {
+    return normalizeBooleanLabel(value)
   }
 
-  if (isSelectField.value) {
-    const options = selectedFieldOptions.value
-    if (builderOperator.value === 'in') {
-      const labels = Array.isArray(filterValue)
-        ? filterValue.map(value => options.find(option => option.value === value)?.label ?? value)
-        : []
+  if (fieldType === 'select') {
+    const options = normalizeSelectOptions(field?.options)
+    if (operator === 'in') {
+      const list = Array.isArray(value) ? value : (value ? [value] : [])
+      const labels = list.map(item => options.find(option => option.value === item)?.label ?? item)
       return labels.join(', ')
     }
-    return options.find(option => option.value === filterValue)?.label ?? filterValue
+    return options.find(option => option.value === value)?.label ?? value
   }
 
-  if (isRelationshipField.value) {
-    return relationshipLabel.value || filterValue
+  if (fieldType === 'relationship') {
+    return condition?.valueLabel || value
   }
 
-  return filterValue
+  if (Array.isArray(value)) {
+    return value.join(', ')
+  }
+
+  return value ?? ''
 }
 
-function handleRelationshipSelect(record) {
-  relationshipLabel.value = record?.name || String(record?.id || '')
+function normalizeSelectOptions(options) {
+  if (!options) return []
+  if (Array.isArray(options)) {
+    return options.map(option => ({
+      value: option,
+      label: String(option)
+    }))
+  }
+  return Object.entries(options).map(([value, label]) => ({
+    value,
+    label: String(label)
+  }))
 }
 
-function handleRelationshipClear() {
-  relationshipLabel.value = ''
+function normalizeBooleanLabel(value) {
+  if (value === true || value === 'true' || value === 1 || value === '1') return 'True'
+  if (value === false || value === 'false' || value === 0 || value === '0') return 'False'
+  return String(value ?? '')
+}
+
+function normalizeFilterDefinition(definition) {
+  if (!definition || typeof definition !== 'object') {
+    return { group: 'AND', filters: [] }
+  }
+
+  if (definition.group && Array.isArray(definition.filters)) {
+    return {
+      group: String(definition.group).toUpperCase() === 'OR' ? 'OR' : 'AND',
+      filters: normalizeConditionList(definition.filters)
+    }
+  }
+
+  if (Array.isArray(definition.filters)) {
+    return {
+      group: 'AND',
+      filters: normalizeConditionList(definition.filters)
+    }
+  }
+
+  if (Array.isArray(definition)) {
+    return {
+      group: 'AND',
+      filters: normalizeConditionList(definition)
+    }
+  }
+
+  const entries = Object.entries(definition)
+  if (entries.length) {
+    const filters = entries.map(([field, value]) => ({
+      field,
+      operator: 'eq',
+      value
+    }))
+    return { group: 'AND', filters }
+  }
+
+  return { group: 'AND', filters: [] }
+}
+
+function normalizeConditionList(filters) {
+  return (filters || [])
+    .filter(filter => filter && typeof filter === 'object' && filter.field)
+    .map(filter => ({
+      field: filter.field,
+      operator: filter.operator || 'eq',
+      value: filter.value ?? null,
+      valueLabel: filter.valueLabel || filter.value_label || undefined
+    }))
 }
 
 async function loadStoredFilters() {
@@ -707,16 +711,8 @@ async function saveCurrentFilter() {
   savingFilter.value = true
   storedError.value = ''
 
-  const filterValue = normalizeFilterValue()
-  const definition = {
-    filters: [
-      {
-        field: builderField.value,
-        operator: builderOperator.value,
-        value: filterValue
-      }
-    ]
-  }
+  const conditions = getValidConditions()
+  const definition = buildPayloadFromConditions(conditions)
 
   try {
     const record = await entityService.createFilter({
@@ -792,13 +788,7 @@ function startEditFilter(filter) {
   editName.value = filter.name || ''
 
   const definition = filter.definition || filter?.definition_json || null
-  const rule = Array.isArray(definition?.filters) ? definition.filters[0] : null
-  if (!rule) return
-  builderField.value = rule.field || ''
-  builderOperator.value = rule.operator || 'contains'
-  builderValue.value = rule.value ?? ''
-  relationshipLabel.value = ''
-  relationshipResetKey.value += 1
+  builderGroup.value = normalizeFilterDefinition(definition)
 }
 
 async function updateStoredFilter() {
@@ -808,16 +798,8 @@ async function updateStoredFilter() {
   updatingFilter.value = true
   storedError.value = ''
 
-  const filterValue = normalizeFilterValue()
-  const definition = {
-    filters: [
-      {
-        field: builderField.value,
-        operator: builderOperator.value,
-        value: filterValue
-      }
-    ]
-  }
+  const conditions = getValidConditions()
+  const definition = buildPayloadFromConditions(conditions)
 
   try {
     await entityService.updateFilter(editFilterId.value, {
@@ -864,6 +846,44 @@ function cancelEditMode() {
 
 .filter-toggle {
   align-self: flex-start;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cbd5f5;
+  border-radius: 999px;
+  padding: 0.1rem 0.35rem;
+}
+
+.chip-button {
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  color: #0f172a;
+  font-size: 0.85rem;
+}
+
+.chip-button:hover {
+  color: #0b5ed7;
+}
+
+.chip-remove {
+  background: transparent;
+  border: none;
+  padding: 0 0.35rem 0 0.1rem;
+  color: #6b7280;
+}
+
+.chip-remove:hover {
+  color: #dc3545;
 }
 
 .stored-list .btn.active {

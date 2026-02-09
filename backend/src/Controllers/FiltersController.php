@@ -81,7 +81,7 @@ class FiltersController extends BaseController
         if (!$normalizedDefinition) {
             $this->jsonHalt(['error' => 'Filter definition is required'], 400);
         }
-        $this->validateFiltersForEntity($entityName, $normalizedDefinition['filters']);
+        $this->validateFiltersForEntity($entityName, $normalizedDefinition);
 
         $payload = [
             'name' => $name,
@@ -151,12 +151,12 @@ class FiltersController extends BaseController
         }
 
         if (array_key_exists('definition', $data)) {
-            $normalizedDefinition = $this->normalizeDefinitionPayload($data['definition']);
-            if (!$normalizedDefinition) {
-                $this->jsonHalt(['error' => 'Filter definition is required'], 400);
-            }
-            $this->validateFiltersForEntity($entityName, $normalizedDefinition['filters']);
-            $updates['definition'] = json_encode($normalizedDefinition, JSON_UNESCAPED_SLASHES);
+        $normalizedDefinition = $this->normalizeDefinitionPayload($data['definition']);
+        if (!$normalizedDefinition) {
+            $this->jsonHalt(['error' => 'Filter definition is required'], 400);
+        }
+        $this->validateFiltersForEntity($entityName, $normalizedDefinition);
+        $updates['definition'] = json_encode($normalizedDefinition, JSON_UNESCAPED_SLASHES);
         }
 
         if (array_key_exists('description', $data)) {
@@ -264,15 +264,12 @@ class FiltersController extends BaseController
             return null;
         }
 
-        $filters = $definition['filters'] ?? $definition;
-        $normalizedFilters = $this->normalizeFilters($filters);
-        if (empty($normalizedFilters)) {
+        $normalizedDefinition = $this->normalizeFilterExpression($definition);
+        if (!$normalizedDefinition) {
             return null;
         }
 
-        return [
-            'filters' => $normalizedFilters,
-        ];
+        return $normalizedDefinition;
     }
 
     /**
@@ -322,12 +319,128 @@ class FiltersController extends BaseController
     }
 
     /**
-     * @param array<int, array{field: string, operator: string, value: mixed}> $filters
+     * @param mixed $filters
+     * @return array{group: string, filters: array<int, array<string, mixed>>}|null
+     */
+    private function normalizeFilterExpression($filters): ?array
+    {
+        if (!is_array($filters)) {
+            return null;
+        }
+
+        if (array_key_exists('filters', $filters) && !array_key_exists('group', $filters)) {
+            return $this->normalizeFilterExpression($filters['filters']);
+        }
+
+        if (array_key_exists('group', $filters) && array_key_exists('filters', $filters)) {
+            $group = strtoupper((string) $filters['group']);
+            $children = $filters['filters'];
+            if (!is_array($children)) {
+                return null;
+            }
+
+            $normalizedChildren = [];
+            foreach ($children as $child) {
+                $normalizedChild = $this->normalizeFilterExpressionChild($child);
+                if ($normalizedChild !== null) {
+                    $normalizedChildren[] = $normalizedChild;
+                }
+            }
+
+            if (empty($normalizedChildren)) {
+                return null;
+            }
+
+            return [
+                'group' => $group,
+                'filters' => $normalizedChildren,
+            ];
+        }
+
+        $keys = array_keys($filters);
+        $isAssoc = $keys !== range(0, count($keys) - 1);
+
+        if ($isAssoc) {
+            $normalizedFilters = $this->normalizeFilters($filters);
+            if (empty($normalizedFilters)) {
+                return null;
+            }
+            return [
+                'group' => 'AND',
+                'filters' => $normalizedFilters,
+            ];
+        }
+
+        $normalizedChildren = [];
+        foreach ($filters as $child) {
+            $normalizedChild = $this->normalizeFilterExpressionChild($child);
+            if ($normalizedChild !== null) {
+                $normalizedChildren[] = $normalizedChild;
+            }
+        }
+
+        if (empty($normalizedChildren)) {
+            return null;
+        }
+
+        return [
+            'group' => 'AND',
+            'filters' => $normalizedChildren,
+        ];
+    }
+
+    /**
+     * @param mixed $child
+     * @return array<string, mixed>|null
+     */
+    private function normalizeFilterExpressionChild($child): ?array
+    {
+        if (!is_array($child)) {
+            return null;
+        }
+
+        if (array_key_exists('group', $child) && array_key_exists('filters', $child)) {
+            return $this->normalizeFilterExpression($child);
+        }
+
+        $field = $child['field'] ?? null;
+        if (!$field) {
+            return null;
+        }
+
+        return [
+            'field' => $field,
+            'operator' => $child['operator'] ?? 'eq',
+            'value' => $child['value'] ?? null,
+        ];
+    }
+
+    /**
+     * @param array{group: string, filters: array<int, array<string, mixed>>} $filters
      */
     private function validateFiltersForEntity(string $entityName, array $filters): void
     {
         $fields = $GLOBALS['metadata']['entities'][$entityName]['fields'] ?? [];
-        foreach ($filters as $filter) {
+        $group = strtoupper((string) ($filters['group'] ?? ''));
+        if (!in_array($group, ['AND', 'OR'], true)) {
+            $this->jsonHalt(['error' => "Filter group '{$group}' is not supported"], 400);
+        }
+
+        $children = $filters['filters'] ?? null;
+        if (!is_array($children) || empty($children)) {
+            $this->jsonHalt(['error' => 'Filter definition is required'], 400);
+        }
+
+        foreach ($children as $filter) {
+            if (is_array($filter) && array_key_exists('group', $filter) && array_key_exists('filters', $filter)) {
+                $this->validateFiltersForEntity($entityName, $filter);
+                continue;
+            }
+
+            if (!is_array($filter)) {
+                continue;
+            }
+
             $field = $filter['field'] ?? null;
             if (!$field) {
                 continue;
