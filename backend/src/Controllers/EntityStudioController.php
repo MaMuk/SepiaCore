@@ -127,6 +127,9 @@ class EntityStudioController extends BaseController
                 case 'updateIcon':
                     $this->updateIcon($requestData['entity'], $requestData['icon']);
                     break;
+                case 'updateCapabilities':
+                    $this->updateCapabilities($requestData['entity'] ?? null, $requestData['capabilities'] ?? null);
+                    break;
 
                 default:
                     throw new Exception('Unknown action: ' . $action);
@@ -821,6 +824,11 @@ PHP;
                     'active' => 'true',
                     'requires_admin' => false,
                 ],
+            'list-filter-suggestions' =>
+                [
+                    'active' => 'true',
+                    'requires_admin' => false,
+                ],
         ];
 
         // Store icon if provided
@@ -1087,6 +1095,35 @@ PHP;
             throw new \Exception("Unable to update metadata file.");
         }
         
+        return true;
+    }
+
+    /**
+     * Updates entity capabilities.
+     * @param string|null $entity Entity name
+     * @param array|null $capabilities Capabilities payload
+     * @return bool
+     */
+    public function updateCapabilities(?string $entity, ?array $capabilities): bool
+    {
+        if (!$entity) {
+            throw new \Exception("Entity name is required.");
+        }
+        if (!is_array($capabilities)) {
+            throw new \Exception("Capabilities payload is required.");
+        }
+
+        $entityKey = strtolower($entity);
+        if (!isset($GLOBALS['metadata']['entities'][$entityKey])) {
+            throw new \Exception("Entity '$entity' does not exist.");
+        }
+
+        $GLOBALS['metadata']['entities'][$entityKey]['capabilities'] = $capabilities;
+
+        if (!$this->updateMetaDataFile('EntireFile')) {
+            throw new \Exception("Unable to update metadata file.");
+        }
+
         return true;
     }
 

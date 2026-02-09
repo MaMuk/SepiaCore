@@ -16,6 +16,7 @@
           :editable="editable"
           @delete="handleDelete"
           @update-title="handleUpdateTitle"
+          @update-widget="handleUpdateWidget"
         />
       </div>
     </div>
@@ -33,7 +34,7 @@ const props = defineProps({
   editable: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['remove-widget', 'update-title'])
+const emit = defineEmits(['remove-widget', 'update-title', 'update-widget'])
 
 const gridContainer = ref(null)
 const grid = ref(null)
@@ -66,6 +67,10 @@ function handleDelete(id) {
 
 function handleUpdateTitle(payload) {
   emit('update-title', payload)
+}
+
+function handleUpdateWidget(payload) {
+  emit('update-widget', payload)
 }
 
 function saveLayout() {

@@ -71,6 +71,7 @@
       :editable="isEditMode"
       @remove-widget="handleRemoveWidget"
       @update-title="handleUpdateTitle"
+      @update-widget="handleUpdateWidget"
     />
   </div>
 </template>
@@ -78,6 +79,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useDashboard } from '../composables/useDashboard'
+import { getListLimit } from '../config'
 import DashboardToolbar from '../components/dashboard/DashboardToolbar.vue'
 import DashboardGrid from '../components/dashboard/DashboardGrid.vue'
 
@@ -178,6 +180,16 @@ function handleAddWidget() {
     w: 4,
     h: 2
   }
+
+  if (type === 'list') {
+    newWidget.config = {
+      entity: '',
+      filterId: null,
+      filterLabel: '',
+      limit: getListLimit(),
+      columns: []
+    }
+  }
   widgets.value = [...widgets.value, newWidget]
 }
 
@@ -238,6 +250,20 @@ function handleUpdateTitle({ id, title }) {
   widgets.value = widgets.value.map((widget) => {
     if (String(widget.id) !== String(id)) return widget
     return { ...widget, title }
+  })
+}
+
+function handleUpdateWidget({ id, config }) {
+  if (!config) return
+  widgets.value = widgets.value.map((widget) => {
+    if (String(widget.id) !== String(id)) return widget
+    return {
+      ...widget,
+      config: {
+        ...(widget.config || {}),
+        ...config
+      }
+    }
   })
 }
 </script>

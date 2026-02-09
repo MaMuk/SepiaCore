@@ -813,6 +813,11 @@ class InstallController extends BaseController
                                 'active' => 'true',
                                 'requires_admin' => true,
                             ],
+                        'list-filter-suggestions' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'tokens' => [
@@ -834,6 +839,11 @@ class InstallController extends BaseController
                     ],
                     'capabilities' => [
                         'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'list-filter-suggestions' =>
                             [
                                 'active' => 'false',
                                 'requires_admin' => true,
@@ -883,6 +893,11 @@ class InstallController extends BaseController
                                 'active' => 'true',
                                 'requires_admin' => true,
                             ],
+                        'list-filter-suggestions' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'rawendpointdata' => [
@@ -909,6 +924,11 @@ class InstallController extends BaseController
                                 'active' => 'false',
                                 'requires_admin' => true,
                             ],
+                        'list-filter-suggestions' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'dashboards' => [
@@ -923,6 +943,11 @@ class InstallController extends BaseController
                     ],
                     'capabilities' => [
                         'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'list-filter-suggestions' =>
                             [
                                 'active' => 'false',
                                 'requires_admin' => false,
@@ -960,6 +985,11 @@ class InstallController extends BaseController
                                 'active' => 'false',
                                 'requires_admin' => false,
                             ],
+                        'list-filter-suggestions' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
                     ]
                 ],
                 'modulebuilder' => [
@@ -968,6 +998,11 @@ class InstallController extends BaseController
                     ],
                     'capabilities' => [
                         'action-console' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'list-filter-suggestions' =>
                             [
                                 'active' => 'false',
                                 'requires_admin' => true,

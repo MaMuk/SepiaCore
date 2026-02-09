@@ -24,6 +24,8 @@
         <component
           v-if="widgetComponent"
           :is="widgetComponent"
+          v-bind="widgetProps"
+          @update-widget="handleUpdateWidget"
         />
         <div v-else class="text-muted small">
           Widget type {{ widget.type }} not implemented yet.
@@ -35,21 +37,35 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import ActionConsole from '../widgets/ActionConsole.vue'
+import ListWidget from '../widgets/ListWidget.vue'
 
 const props = defineProps({
   widget: { type: Object, required: true },
   editable: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['update-title', 'delete'])
+const emit = defineEmits(['update-title', 'delete', 'update-widget'])
 
 const localTitle = ref(props.widget.title || 'Widget')
 
 const widgetComponent = computed(() => {
+  if (props.widget.type === 'list') {
+    return ListWidget
+  }
   if (props.widget.type === 'action-console') {
     return ActionConsole
   }
   return null
+})
+
+const widgetProps = computed(() => {
+  if (props.widget.type === 'list') {
+    return {
+      widget: props.widget,
+      editable: props.editable
+    }
+  }
+  return {}
 })
 
 watch(
@@ -61,6 +77,10 @@ watch(
 
 function handleTitleInput() {
   emit('update-title', { id: props.widget.id, title: localTitle.value })
+}
+
+function handleUpdateWidget(payload) {
+  emit('update-widget', payload)
 }
 </script>
 

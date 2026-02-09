@@ -156,6 +156,10 @@ const availableEntities = computed(() => {
       }))
 })
 
+const filterSuggestionEntities = computed(() => {
+  return availableEntities.value.filter(entity => isEntityAllowedForCapability(entity.name, 'list-filter-suggestions'))
+})
+
 const historyStorageKey = computed(() => {
   const user = authStore.username || 'anonymous'
   return `${HISTORY_STORAGE_PREFIX}_${user}`
@@ -348,7 +352,7 @@ function updateSuggestions() {
     }
   } else if (commandToken === 'filter') {
     if (tokens.length <= 2) {
-      list = buildEntitySuggestions(entityToken)
+      list = buildEntitySuggestions(entityToken, 'filter')
     } else if (usingStoredFilter) {
       if (tokens.length <= 3) {
         list = buildStoredFilterSuggestions(entityToken, fieldToken)
@@ -368,9 +372,10 @@ function updateSuggestions() {
   activeSuggestionIndex.value = 0
 }
 
-function buildEntitySuggestions(token) {
+function buildEntitySuggestions(token, mode = 'default') {
   const lower = (token || '').toLowerCase()
-  return availableEntities.value
+  const source = mode === 'filter' ? filterSuggestionEntities.value : availableEntities.value
+  return source
       .filter(entity => !lower || entity.name.toLowerCase().startsWith(lower))
       .map(entity => ({
         value: entity.name,
@@ -1247,6 +1252,31 @@ function isEntityAllowed(entityName) {
   if (!entityMeta) return false
 
   const capability = entityMeta.capabilities?.['action-console']
+  let active = true
+  let requiresAdmin = false
+
+  if (capability !== undefined) {
+    if (typeof capability === 'boolean' || typeof capability === 'string') {
+      active = toBoolean(capability)
+    } else if (typeof capability === 'object') {
+      if (capability.active !== undefined) {
+        active = toBoolean(capability.active)
+      }
+      if (capability.requires_admin !== undefined) {
+        requiresAdmin = toBoolean(capability.requires_admin)
+      }
+    }
+  }
+
+  if (requiresAdmin && !authStore.isAdmin) return false
+  return active
+}
+
+function isEntityAllowedForCapability(entityName, capabilityKey) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName)
+  if (!entityMeta) return false
+
+  const capability = entityMeta.capabilities?.[capabilityKey]
   let active = true
   let requiresAdmin = false
 

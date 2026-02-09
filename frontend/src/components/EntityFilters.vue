@@ -111,6 +111,7 @@
         <div class="d-flex align-items-center mt-2">
           <small v-if="!builderReady" class="text-muted">Set a field, operator, and value to apply.</small>
           <button
+            v-if="!editMode"
             class="btn btn-outline-primary btn-sm ms-auto"
             type="button"
             :disabled="!builderReady || savingFilter"
@@ -118,12 +119,21 @@
           >
             Save
           </button>
+          <button
+            v-else
+            class="btn btn-primary btn-sm ms-auto"
+            type="button"
+            :disabled="!builderReady || updatingFilter"
+            @click="updateStoredFilter"
+          >
+            Update
+          </button>
           <button class="btn btn-link btn-sm" type="button" @click="clearFilter">
             Clear
           </button>
         </div>
 
-        <div v-if="saveMode" class="mt-2 d-flex align-items-center gap-2">
+        <div v-if="saveMode && !editMode" class="mt-2 d-flex align-items-center gap-2">
           <input
             v-model="saveName"
             type="text"
@@ -140,6 +150,27 @@
             Save
           </button>
           <button class="btn btn-link btn-sm" type="button" @click="cancelSaveMode">
+            Cancel
+          </button>
+        </div>
+
+        <div v-if="editMode" class="mt-2 d-flex align-items-center gap-2">
+          <input
+            v-model="editName"
+            type="text"
+            class="form-control form-control-sm"
+            placeholder="Filter name"
+            @keyup.enter="updateStoredFilter"
+          />
+          <button
+            class="btn btn-primary btn-sm"
+            type="button"
+            :disabled="!editName.trim() || !builderReady || updatingFilter"
+            @click="updateStoredFilter"
+          >
+            Update
+          </button>
+          <button class="btn btn-link btn-sm" type="button" @click="cancelEditMode">
             Cancel
           </button>
         </div>
@@ -170,6 +201,13 @@
               @click="selectStoredFilter(filter)"
             >
               {{ filter.name }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-primary"
+              @click.stop="startEditFilter(filter)"
+            >
+              <i class="bi bi-pencil"></i>
             </button>
             <button
               type="button"
@@ -222,13 +260,21 @@ const props = defineProps({
   fields: {
     type: Array,
     default: () => []
+  },
+  requireStored: {
+    type: Boolean,
+    default: false
+  },
+  initialFilterId: {
+    type: [String, Number],
+    default: null
   }
 })
 
 const emit = defineEmits(['filter-change'])
 
 const isOpen = ref(false)
-const mode = ref('builder')
+const mode = ref(props.requireStored ? 'stored' : 'builder')
 
 const builderField = ref('')
 const builderOperator = ref('contains')
@@ -245,6 +291,10 @@ const savingFilter = ref(false)
 const saveMode = ref(false)
 const saveName = ref('')
 const deletingIds = ref([])
+const editMode = ref(false)
+const editFilterId = ref(null)
+const editName = ref('')
+const updatingFilter = ref(false)
 
 const activeLabel = ref('')
 const activeMode = ref(null)
@@ -374,6 +424,7 @@ function toggleOpen() {
 function scheduleBuilderEmit() {
   clearTimeout(emitTimeout)
   emitTimeout = setTimeout(() => {
+    if (props.requireStored) return
     if (mode.value !== 'builder') return
     if (!builderReady.value) {
       if (activeMode.value === 'builder') {
@@ -430,6 +481,9 @@ function clearFilter() {
   activeLabel.value = ''
   saveMode.value = false
   saveName.value = ''
+  editMode.value = false
+  editFilterId.value = null
+  editName.value = ''
   emit('filter-change', null)
 }
 
@@ -444,6 +498,9 @@ function resetState() {
   activeLabel.value = ''
   saveMode.value = false
   saveName.value = ''
+  editMode.value = false
+  editFilterId.value = null
+  editName.value = ''
 }
 
 watch(fieldOptions, (next) => {
@@ -489,6 +546,14 @@ watch([builderField, builderOperator, builderValue], () => {
 watch(mode, (next) => {
   if (next === 'builder') {
     selectedStoredId.value = null
+    if (props.requireStored) {
+      if (activeMode.value) {
+        activeMode.value = null
+        activeLabel.value = ''
+        emit('filter-change', null)
+      }
+      return
+    }
     if (builderReady.value) {
       scheduleBuilderEmit()
     } else if (activeMode.value) {
@@ -512,9 +577,28 @@ watch(mode, (next) => {
 
 watch(() => props.entityName, () => {
   resetState()
-  emit('filter-change', null)
+  if (props.requireStored && props.initialFilterId) {
+    selectedStoredId.value = props.initialFilterId
+  } else {
+    emit('filter-change', null)
+  }
   loadStoredFilters()
 })
+
+watch(() => props.initialFilterId, (next) => {
+  if (!next) {
+    if (selectedStoredId.value) {
+      selectedStoredId.value = null
+    }
+    if (props.requireStored) {
+      activeMode.value = null
+      activeLabel.value = ''
+      emit('filter-change', null)
+    }
+    return
+  }
+  applyInitialFilterSelection(next)
+}, { immediate: true })
 
 onBeforeUnmount(() => {
   clearTimeout(emitTimeout)
@@ -604,6 +688,9 @@ async function loadStoredFilters() {
         }
       }
     }
+    if (props.initialFilterId) {
+      applyInitialFilterSelection(props.initialFilterId)
+    }
   } catch (error) {
     storedFilters.value = []
     storedError.value = 'Failed to load saved filters.'
@@ -675,7 +762,7 @@ async function deleteStoredFilter(filter) {
 }
 
 function openSaveMode() {
-  if (!builderReady.value) return
+  if (!builderReady.value || editMode.value) return
   saveMode.value = true
   saveName.value = ''
 }
@@ -683,6 +770,84 @@ function openSaveMode() {
 function cancelSaveMode() {
   saveMode.value = false
   saveName.value = ''
+}
+
+function applyInitialFilterSelection(filterId) {
+  if (!filterId) return
+  selectedStoredId.value = filterId
+  const stored = storedFilters.value.find(filter => String(filter.id) === String(filterId))
+  if (stored) {
+    mode.value = 'stored'
+    selectStoredFilter(stored)
+  }
+}
+
+function startEditFilter(filter) {
+  if (!filter?.id) return
+  mode.value = 'builder'
+  saveMode.value = false
+  saveName.value = ''
+  editMode.value = true
+  editFilterId.value = filter.id
+  editName.value = filter.name || ''
+
+  const definition = filter.definition || filter?.definition_json || null
+  const rule = Array.isArray(definition?.filters) ? definition.filters[0] : null
+  if (!rule) return
+  builderField.value = rule.field || ''
+  builderOperator.value = rule.operator || 'contains'
+  builderValue.value = rule.value ?? ''
+  relationshipLabel.value = ''
+  relationshipResetKey.value += 1
+}
+
+async function updateStoredFilter() {
+  if (!builderReady.value || !editFilterId.value || !props.entityName) return
+  const name = editName.value.trim()
+  if (!name) return
+  updatingFilter.value = true
+  storedError.value = ''
+
+  const filterValue = normalizeFilterValue()
+  const definition = {
+    filters: [
+      {
+        field: builderField.value,
+        operator: builderOperator.value,
+        value: filterValue
+      }
+    ]
+  }
+
+  try {
+    await entityService.updateFilter(editFilterId.value, {
+      name,
+      entity: props.entityName,
+      definition
+    })
+    await loadStoredFilters()
+    editMode.value = false
+    editFilterId.value = null
+    editName.value = ''
+    mode.value = 'stored'
+    if (selectedStoredId.value) {
+      const selected = storedFilters.value.find(filter => filter.id === selectedStoredId.value)
+      if (selected) {
+        selectStoredFilter(selected)
+      }
+    }
+  } catch (error) {
+    storedError.value = 'Failed to update filter.'
+  } finally {
+    updatingFilter.value = false
+  }
+}
+
+function cancelEditMode() {
+  editMode.value = false
+  editFilterId.value = null
+  editName.value = ''
+  mode.value = 'stored'
 }
 </script>
 

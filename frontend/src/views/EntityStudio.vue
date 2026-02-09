@@ -172,6 +172,19 @@
           </div>
         </div>
 
+        <!-- Capabilities Card -->
+        <div class="col-md-6 col-lg-4 col-xl-3">
+          <div
+            class="card h-100 shadow-sm action-card clickable"
+            @click="openCapabilitiesModal"
+          >
+            <div class="card-body d-flex flex-column align-items-center justify-content-center text-center p-4">
+              <i class="bi bi-sliders action-icon mb-3"></i>
+              <h5 class="card-title mb-0">Capabilities</h5>
+            </div>
+          </div>
+        </div>
+
         <!-- Relationship Editor Card -->
         <div class="col-md-6 col-lg-4 col-xl-3">
           <div
@@ -255,6 +268,13 @@
       :selected-icon="selectedEntity?.icon || ''"
       @select="handleIconSelect"
     />
+
+    <!-- Capabilities Modal -->
+    <EntityCapabilitiesModal
+      v-model="showCapabilitiesModal"
+      :entity="selectedEntity"
+      @saved="handleCapabilitiesSaved"
+    />
   </div>
 </template>
 
@@ -270,6 +290,7 @@ import RelationshipEditorModal from '../components/RelationshipEditorModal.vue'
 import LayoutEditor from '../components/LayoutEditor.vue'
 import FieldEditor from '../components/FieldEditor.vue'
 import IconSelector from '../components/IconSelector.vue'
+import EntityCapabilitiesModal from '../components/EntityCapabilitiesModal.vue'
 import entityService from '../services/entityService'
 import api from '../services/api'
 
@@ -283,6 +304,7 @@ const showRelationshipEditorModal = ref(false)
 const showLayoutEditor = ref(false)
 const showFieldEditor = ref(false)
 const showIconSelector = ref(false)
+const showCapabilitiesModal = ref(false)
 const relationshipEditorFilterEntity = ref(null)
 
 // Protected entities that cannot be deleted or have fields removed
@@ -347,6 +369,12 @@ function openFieldEditor() {
   }
 }
 
+function openCapabilitiesModal() {
+  if (selectedEntity.value) {
+    showCapabilitiesModal.value = true
+  }
+}
+
 function closeFieldEditor() {
   showFieldEditor.value = false
 }
@@ -383,6 +411,18 @@ function openNewRelationship() {
 
 function handleRelationshipCreated() {
   // Metadata will be refreshed by the modal
+}
+
+async function handleCapabilitiesSaved() {
+  await metadataStore.fetchMetadata()
+  if (selectedEntity.value) {
+    const updatedEntity = metadataStore.getEntityMetadata(selectedEntity.value.name)
+    if (updatedEntity) {
+      Object.assign(selectedEntity.value, updatedEntity, {
+        displayName: metadataStore.formatEntityName(selectedEntity.value.name)
+      })
+    }
+  }
 }
 
 async function handleIconSelect(iconName) {

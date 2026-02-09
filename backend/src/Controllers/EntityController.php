@@ -221,6 +221,10 @@ class EntityController extends BaseController
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
+        if (strtolower($this->model) === 'tokens') {
+            $this->jsonHalt(['error' => 'Access to tokens via filter is forbidden'], 403);
+        }
+
         $request = Flight::request();
         $params = $this->getPaginationParams();
         $payload = $request->data->getData();
@@ -248,7 +252,7 @@ class EntityController extends BaseController
 
         $result = $this->runFilterScan($normalizedFilters, $params, $payload);
         $response = [
-            'records' => $result['records'],
+            'records' => $this->sanitizeFilterRecords($result['records']),
             'total' => $result['total'],
         ];
         $fieldDefinitions = $GLOBALS['metadata']['entities'][$this->model]['fields'] ?? [];
@@ -258,6 +262,26 @@ class EntityController extends BaseController
         }
 
         $this->jsonResponse($response);
+    }
+
+    /**
+     * Removes sensitive fields from filter responses.
+     * @param array $records
+     * @return array
+     */
+    protected function sanitizeFilterRecords(array $records): array
+    {
+        if (strtolower($this->model) !== 'users') {
+            return $records;
+        }
+
+        return array_map(function ($record) {
+            if (!is_array($record)) {
+                return $record;
+            }
+            unset($record['password_hash'], $record['password']);
+            return $record;
+        }, $records);
     }
 
     /**
