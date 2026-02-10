@@ -66,7 +66,7 @@ class DashboardController extends EntityController
         }
 
         $dashboardsEntity = $this->getEntityClass('Dashboards');
-        $dashboardsEntity->update($id, ['widgets' => $this->encodeWidgetsForStorage($widgets)]);
+        $dashboardsEntity->update($id, ['widgets' => $this->prepareWidgetsForStorage($dashboardsEntity, $widgets)]);
 
         $updated = $dashboardsEntity->read($id);
 
@@ -98,7 +98,7 @@ class DashboardController extends EntityController
             'name' => $name,
             'owner' => $userId,
             'is_default' => $isDefault,
-            'widgets' => $this->encodeWidgetsForStorage([]),
+            'widgets' => $this->prepareWidgetsForStorage($dashboardsEntity, []),
         ]);
 
         $createdDashboard = $dashboardsEntity->read($created['id']);
@@ -195,7 +195,7 @@ class DashboardController extends EntityController
                 'name' => 'Main Dashboard',
                 'owner' => $userId,
                 'is_default' => true,
-                'widgets' => $this->encodeWidgetsForStorage([]),
+                'widgets' => $this->prepareWidgetsForStorage($dashboardsEntity, []),
             ]);
             $dashboards = $this->loadDashboardsForUser($userId);
         }
@@ -241,21 +241,68 @@ class DashboardController extends EntityController
 
     private function normalizeWidgets($widgets): array
     {
-        if (is_string($widgets)) {
-            $decoded = json_decode($widgets, true);
-            return (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [];
-        }
-
-        if (is_array($widgets)) {
-            return $widgets;
-        }
-
-        return [];
+        return $this->normalizeWidgetsValue($widgets);
     }
 
-    private function encodeWidgetsForStorage(array $widgets): string
+    private function normalizeWidgetsValue($widgets, int $depth = 0): array
     {
-        return json_encode(array_values($widgets));
+        if ($depth > 4) {
+            return [];
+        }
+
+        if (is_string($widgets)) {
+            $decoded = json_decode($widgets, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return [];
+            }
+            return $this->normalizeWidgetsValue($decoded, $depth + 1);
+        }
+
+        if (!is_array($widgets)) {
+            return [];
+        }
+
+        if ($this->isAssocArray($widgets)) {
+            return [$widgets];
+        }
+
+        $normalized = [];
+        foreach ($widgets as $item) {
+            if (is_array($item) && $this->isAssocArray($item)) {
+                $normalized[] = $item;
+                continue;
+            }
+
+            foreach ($this->normalizeWidgetsValue($item, $depth + 1) as $nestedWidget) {
+                $normalized[] = $nestedWidget;
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    private function isAssocArray(array $value): bool
+    {
+        if ($value === []) {
+            return false;
+        }
+
+        return array_keys($value) !== range(0, count($value) - 1);
+    }
+
+    private function prepareWidgetsForStorage($dashboardsEntity, array $widgets)
+    {
+        $normalizedWidgets = array_values($this->normalizeWidgets($widgets));
+        $fieldDefs = method_exists($dashboardsEntity, 'getFieldDefs')
+            ? $dashboardsEntity->getFieldDefs()
+            : [];
+
+        if (($fieldDefs['widgets']['type'] ?? null) === 'collection') {
+            return $normalizedWidgets;
+        }
+
+        $encoded = json_encode($normalizedWidgets, JSON_UNESCAPED_SLASHES);
+        return $encoded === false ? '[]' : $encoded;
     }
 
     private function findDefaultDashboard(array $dashboards): ?array
