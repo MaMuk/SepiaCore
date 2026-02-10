@@ -231,6 +231,9 @@ const emit = defineEmits(['update:modelValue', 'saved'])
 const metadataStore = useMetadataStore()
 const toastStore = useToastStore()
 
+const protectedEntities = computed(() => metadataStore.protectedEntities || [])
+const existingEntityNames = computed(() => Object.keys(metadataStore.entities || {}).map(name => name.toLowerCase()))
+
 const form = ref({
   entityName: '',
   tableName: '',
@@ -265,7 +268,8 @@ const isFormValid = computed(() => {
          !form.value.entityName.trim().endsWith(' ') &&
          !form.value.entityName.trim().endsWith('.') &&
          form.value.tableName.trim().length > 0 &&
-         form.value.className.trim().length > 0
+         form.value.className.trim().length > 0 &&
+         !errors.value.entityName
 })
 
 // Reset form when modal opens
@@ -310,6 +314,7 @@ function handleTableNameInput(event) {
 
 function validateEntityName() {
   const name = form.value.entityName.trim()
+  const normalizedName = name.toLowerCase()
   errors.value.entityName = null
 
   if (name.length === 0) {
@@ -318,6 +323,10 @@ function validateEntityName() {
     errors.value.entityName = 'Entity name must be 20 characters or less'
   } else if (name.endsWith(' ') || name.endsWith('.')) {
     errors.value.entityName = 'Entity name cannot end with a space or dot'
+  } else if (protectedEntities.value.includes(normalizedName)) {
+    errors.value.entityName = 'That entity name is reserved for system use'
+  } else if (existingEntityNames.value.includes(normalizedName)) {
+    errors.value.entityName = 'An entity with that name already exists'
   }
 }
 
@@ -501,4 +510,3 @@ function handleBackdropClick() {
   opacity: 0.5;
 }
 </style>
-

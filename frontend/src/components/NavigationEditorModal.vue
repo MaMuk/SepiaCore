@@ -114,8 +114,7 @@ const emit = defineEmits(['update:modelValue', 'saved'])
 const metadataStore = useMetadataStore()
 const toastStore = useToastStore()
 
-// Protected entities that should be excluded from navigation editor
-const PROTECTED_ENTITIES = ['users', 'tokens', 'rawendpointdata', 'modulebuilder', 'endpoints']
+const protectedEntities = computed(() => metadataStore.protectedEntities || [])
 
 const navigationEntities = ref([])
 const availableEntities = ref([])
@@ -140,15 +139,15 @@ watch(isVisible, (newVal) => {
 function initializeLists() {
   const allEntities = metadataStore.entities || {}
   const currentNavigation = metadataStore.navigationEntities || []
-  
-  // Get current navigation entity names
-  const navigationNames = currentNavigation.map(e => e.name)
+
+  const filteredNavigation = currentNavigation.filter((entity) => !isProtectedEntity(entity.name))
+  const navigationNames = filteredNavigation.map(e => e.name)
   
   // Filter available entities (not in navigation, not protected)
   const available = Object.keys(allEntities)
-    .filter(entityName => 
+    .filter(entityName =>
       !navigationNames.includes(entityName) &&
-      !PROTECTED_ENTITIES.includes(entityName.toLowerCase())
+      !isProtectedEntity(entityName)
     )
     .map(entityName => ({
       name: entityName,
@@ -156,13 +155,17 @@ function initializeLists() {
     }))
   
   // Get navigation entities with display names
-  const navigation = currentNavigation.map(entity => ({
+  const navigation = filteredNavigation.map(entity => ({
     name: entity.name,
     displayName: entity.displayName || metadataStore.formatEntityName(entity.name)
   }))
   
   availableEntities.value = available
   navigationEntities.value = navigation
+}
+
+function isProtectedEntity(entityName) {
+  return protectedEntities.value.includes(entityName.toLowerCase())
 }
 
 function handleDragStart(event, entity, source, index = null) {
@@ -247,11 +250,12 @@ async function saveNavigation() {
   saving.value = true
   
   try {
-    // Format navigation entities as object with numeric keys (1, 2, 3...)
-    const navigationData = {}
-    navigationEntities.value.forEach((entity, index) => {
-      navigationData[index + 1] = entity.name
-    })
+    const navigationData = navigationEntities.value.length
+      ? navigationEntities.value.reduce((acc, entity, index) => {
+          acc[index + 1] = entity.name
+          return acc
+        }, {})
+      : []
     
     const response = await api.post('/modulebuilder/setNavigationEntities', navigationData)
     
@@ -332,4 +336,3 @@ function handleBackdropClick() {
   margin-bottom: 0;
 }
 </style>
-

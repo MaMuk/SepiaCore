@@ -1010,6 +1010,15 @@ class InstallController extends BaseController
                     ]
                 ],
             ],
+            'protected_entities' => [
+                'users',
+                'tokens',
+                'endpoints',
+                'rawendpointdata',
+                'dashboards',
+                'saved_filters',
+                'modulebuilder',
+            ],
             'navigation_entities' => [],
             'backendview_entities' => ['endpoints'],
             'relationships' => [],

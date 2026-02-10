@@ -30,6 +30,16 @@ export const useMetadataStore = defineStore('metadata', () => {
     return metadata.value?.entities || {}
   })
 
+  const protectedEntities = computed(() => {
+    const list = metadata.value?.protected_entities
+    if (!list) return []
+
+    const entitiesList = Array.isArray(list) ? list : Object.values(list)
+    return entitiesList
+      .filter(Boolean)
+      .map((name) => name.toString().toLowerCase())
+  })
+
   function formatEntityName(name) {
     // Convert snake_case or camelCase to Title Case
     return name
@@ -75,6 +85,7 @@ export const useMetadataStore = defineStore('metadata', () => {
     metadata,
     navigationEntities,
     entities,
+    protectedEntities,
     loading,
     error,
     fetchMetadata,

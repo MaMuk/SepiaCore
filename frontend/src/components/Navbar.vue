@@ -53,9 +53,29 @@
 
       <div
         class="navbar-center-group"
-        :class="{ 'is-open': isNavOpen }"
+        :class="{ 'is-open': isNavOpen || showEmptyNavNotice }"
       >
-        <div class="entity-scroll entity-button-group" @scroll="closeEntityDropdowns">
+        <div v-if="showEmptyNavNotice" class="nav-empty-state entity-scroll entity-button-group">
+          <i class="bi bi-info-circle nav-empty-icon" aria-hidden="true"></i>
+          <div class="nav-empty-text">
+            <span class="nav-empty-title">No entities in navigation.</span>
+            <span v-if="isAdmin" class="nav-empty-subtitle">
+              Go to Settings &gt; Entity Studio to create entities, then use Edit Navigation to add them here.
+            </span>
+            <span v-else class="nav-empty-subtitle">
+              No entities have been added to the navigation yet.
+            </span>
+          </div>
+          <button
+            v-if="isAdmin"
+            type="button"
+            class="nav-empty-cta"
+            @click.prevent="handleSettings"
+          >
+            Open Settings
+          </button>
+        </div>
+        <div v-else class="entity-scroll entity-button-group" @scroll="closeEntityDropdowns">
           <div
             v-for="entity in navigationEntities"
             :key="entity.name"
@@ -139,6 +159,8 @@ const metadataStore = useMetadataStore()
 const { openRecordWindow } = useWinbox()
 
 const navigationEntities = computed(() => metadataStore.navigationEntities)
+const showEmptyNavNotice = computed(() => metadataStore.metadata && navigationEntities.value.length === 0)
+const isAdmin = computed(() => authStore.isAdmin)
 const openDropdowns = ref({})
 const openUserDropdown = ref(false)
 const isNavOpen = ref(false)
@@ -423,6 +445,77 @@ async function handleLogout() {
   padding: 6px;
 }
 
+.nav-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #fff7e6;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  color: #92400e;
+  box-shadow: 0 8px 20px rgba(180, 83, 9, 0.12);
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.nav-empty-state::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
+.nav-empty-icon {
+  font-size: 1.1rem;
+  flex: 0 0 auto;
+}
+
+.nav-empty-text {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.nav-empty-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  flex: 0 0 auto;
+}
+
+.nav-empty-subtitle {
+  font-size: 0.78rem;
+  color: #b45309;
+  flex: 0 0 auto;
+}
+
+.nav-empty-cta {
+  border: none;
+  background: #f59e0b;
+  color: #1f2937;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  flex: 0 0 auto;
+}
+
+.nav-empty-cta:hover {
+  background: #fbbf24;
+  box-shadow: 0 8px 16px rgba(180, 83, 9, 0.18);
+  transform: translateY(-1px);
+}
+
+.nav-empty-cta:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35);
+}
+
 @media (max-width: 767.98px) {
   .nav-container {
     display: flex;
@@ -450,6 +543,10 @@ async function handleLogout() {
   .navbar-center-group.is-open .entity-scroll {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .nav-empty-state {
+    border-radius: 18px;
   }
 }
 </style>

@@ -296,7 +296,7 @@ function loadMetadata() {
     $requestUri = $_SERVER['REQUEST_URI'] ?? '';
     // Remove query string for matching
     $requestPath = parse_url($requestUri, PHP_URL_PATH) ?? $requestUri;
-    $isInstallRoute = preg_match('#^/(ping|install(/requirements)?)(/|$)#', $requestPath);
+    $isInstallRoute = preg_match('#^(/backend)?/(ping|install(/requirements)?)(/|$)#', $requestPath);
     
     // Load metadata - always from file, no fallback
     if (file_exists(METADATA_FILE)) {

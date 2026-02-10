@@ -60,6 +60,35 @@ class EntityStudioController extends BaseController
     }
 
     /**
+     * Gets protected entities list from metadata.
+     * @return array
+     */
+    private function getProtectedEntities(): array
+    {
+        $protected = $GLOBALS['metadata']['protected_entities'] ?? [];
+        if (!is_array($protected)) {
+            return [];
+        }
+
+        $normalized = array_map(
+            static fn($name) => mb_strtolower((string)$name),
+            array_filter($protected, static fn($name) => $name !== null && $name !== '')
+        );
+
+        return array_values(array_unique($normalized));
+    }
+
+    /**
+     * Checks if entity is protected.
+     * @param string $entityName
+     * @return bool
+     */
+    private function isProtectedEntity(string $entityName): bool
+    {
+        return in_array(mb_strtolower($entityName), $this->getProtectedEntities(), true);
+    }
+
+    /**
      * Gets entity studio UI.
      * @return void
      */
@@ -225,10 +254,9 @@ class EntityStudioController extends BaseController
     public function deleteEntity(string $entityName): array
     {
         $entityKey = strtolower($entityName);
-        $protectedEntities = ['users', 'tokens', 'modulebuilder', 'dashboards', 'saved_filters'];
         $className = ucfirst($entityKey);
 
-        if (in_array($entityKey, $protectedEntities, true)) {
+        if ($this->isProtectedEntity($entityKey)) {
             throw new \Exception("Deletion of $className entity is not allowed.");
         }
 
@@ -726,6 +754,14 @@ class EntityStudioController extends BaseController
             throw new \Exception('Invalid table name');
         }
 
+        if ($this->isProtectedEntity($entityKey)) {
+            throw new \Exception("Entity name '$entityKey' is reserved for system use.");
+        }
+
+        if (isset($GLOBALS['metadata']['entities'][$entityKey])) {
+            throw new \Exception("Entity '$entityKey' already exists.");
+        }
+
         // Create the full path: ROOT_DIR/Entities/[ClassName]/[ClassName].php
         $entityDirPath = ROOT_DIR . '/Entities/';
         $dirPath = $entityDirPath . $className;
@@ -1134,15 +1170,22 @@ PHP;
      */
     public function setNavigationEntities(array $navigation_entities): bool
     {
-        if (!empty($navigation_entities)) {
-            $this->newNavigationEntities = $navigation_entities;
-            if ($this->updateMetaDataFile('UpdateNavigationEntities')) {
-                return true;
-            } else {
-                return false;
+        $protected = $this->getProtectedEntities();
+        if (!empty($protected)) {
+            $incoming = array_map('mb_strtolower', array_values($navigation_entities));
+            $blocked = array_values(array_intersect($incoming, $protected));
+            if (!empty($blocked)) {
+                $blockedList = implode(', ', array_unique($blocked));
+                throw new \Exception("Protected entities cannot be added to navigation: $blockedList.");
             }
         }
-        return false;
+
+        $this->newNavigationEntities = $navigation_entities;
+        if (!$this->updateMetaDataFile('UpdateNavigationEntities')) {
+            throw new \Exception('Unable to update navigation entities.');
+        }
+
+        return true;
     }
 
     /**

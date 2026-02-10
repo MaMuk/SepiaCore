@@ -223,8 +223,7 @@ const emit = defineEmits(['update:modelValue', 'saved'])
 const metadataStore = useMetadataStore()
 const toastStore = useToastStore()
 
-// Protected entities that should be excluded from relationships
-const PROTECTED_ENTITIES = ['users', 'tokens', 'rawendpointdata', 'modulebuilder', 'endpoints']
+const protectedEntities = computed(() => metadataStore.protectedEntities || [])
 
 const form = ref({
   lhEntity: '',
@@ -245,7 +244,7 @@ const isVisible = computed({
 const relatableEntities = computed(() => {
   const entities = metadataStore.entities || {}
   return Object.keys(entities)
-    .filter(entityName => !PROTECTED_ENTITIES.includes(entityName.toLowerCase()))
+    .filter(entityName => !isProtectedEntity(entityName))
     .map(entityName => ({
       name: entityName,
       displayName: metadataStore.formatEntityName(entityName)
@@ -273,6 +272,10 @@ const isFormValid = computed(() => {
 function getEntityDisplayName(entityName) {
   if (!entityName) return ''
   return metadataStore.formatEntityName(entityName)
+}
+
+function isProtectedEntity(entityName) {
+  return protectedEntities.value.includes(entityName.toLowerCase())
 }
 
 // Update relationship name and table when entities change
@@ -412,4 +415,3 @@ code {
   font-size: 0.875em;
 }
 </style>
-

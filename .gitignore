@@ -11,6 +11,7 @@
 !/backend/Entities/Rawendpointdata/
 !/backend/Entities/Tokens/
 !/backend/Entities/Users/
+!/backend/Entities/Saved_filters/
 /.idea
 /frontend/node_modules/
 /frontend/dist/
