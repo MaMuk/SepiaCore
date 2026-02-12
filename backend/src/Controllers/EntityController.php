@@ -9,12 +9,39 @@ use SepiaCore\Utilities\Log;
 class EntityController extends BaseController
 {
     /**
+     * Enforces access rules for protected entities on generic CRUD endpoints.
+     * @param string $model Entity model name
+     * @param string $action Action name for context
+     * @return void
+     */
+    protected function enforceEntityAccess(string $model, string $action): void
+    {
+        $normalizedModel = strtolower($model);
+
+        if (in_array($normalizedModel, ['users', 'tokens'], true)) {
+            $this->jsonHalt([
+                'error' => "Access to '{$normalizedModel}' via generic entity endpoints is forbidden."
+            ], 403);
+        }
+
+        $protected = $GLOBALS['metadata']['protected_entities'] ?? [];
+        $protected = array_map('strtolower', is_array($protected) ? $protected : []);
+        $writeActions = ['create', 'store', 'update', 'destroy', 'edit'];
+
+        if (in_array($normalizedModel, $protected, true) && in_array($action, $writeActions, true)) {
+            $this->jsonHalt([
+                'error' => "Protected entity '{$normalizedModel}' cannot be modified via generic endpoints."
+            ], 403);
+        }
+    }
+    /**
      * Lists all records with pagination.
      * @param string $model Entity model name
      * @return void
      */
     public function index($model): void
     {
+        $this->enforceEntityAccess($model, 'index');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -50,6 +77,7 @@ class EntityController extends BaseController
      */
     public function show($model, $id): void
     {
+        $this->enforceEntityAccess($model, 'show');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -73,6 +101,7 @@ class EntityController extends BaseController
      */
     public function edit($model, $id): void
     {
+        $this->enforceEntityAccess($model, 'edit');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -94,6 +123,7 @@ class EntityController extends BaseController
      */
     public function create($model): void
     {
+        $this->enforceEntityAccess($model, 'create');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -110,6 +140,7 @@ class EntityController extends BaseController
      */
     public function store($model): void
     {
+        $this->enforceEntityAccess($model, 'store');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -146,6 +177,7 @@ class EntityController extends BaseController
      */
     public function update($model, $id): void
     {
+        $this->enforceEntityAccess($model, 'update');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -188,6 +220,7 @@ class EntityController extends BaseController
      */
     public function destroy($model, $id): void
     {
+        $this->enforceEntityAccess($model, 'destroy');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -205,6 +238,7 @@ class EntityController extends BaseController
      */
     public function count($model): void
     {
+        $this->enforceEntityAccess($model, 'count');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
 
@@ -218,12 +252,9 @@ class EntityController extends BaseController
      */
     public function filter($model): void
     {
+        $this->enforceEntityAccess($model, 'filter');
         $this->model = $model;
         $this->entity = $this->getEntityClass($model);
-
-        if (strtolower($this->model) === 'tokens') {
-            $this->jsonHalt(['error' => 'Access to tokens via filter is forbidden'], 403);
-        }
 
         $request = Flight::request();
         $params = $this->getPaginationParams();

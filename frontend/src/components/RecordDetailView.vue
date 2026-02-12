@@ -42,6 +42,7 @@
                   :relationship="relationship?.[fieldName]"
                   :mode="currentMode"
                   :form-id="formId"
+                  :entity-name="entityName"
                   @update:value="updateFormData(fieldName, $event)"
                 />
               </div>
@@ -64,6 +65,7 @@
                   :relationship="relationship?.[fieldName]"
                   :mode="'detail'"
                   :form-id="formId"
+                  :entity-name="entityName"
                   @relationship-click="handleRelationshipClick"
                 />
                 </div>

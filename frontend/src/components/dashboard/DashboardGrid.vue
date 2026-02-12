@@ -4,7 +4,7 @@
       v-for="widget in widgets"
       :key="widget.id"
       class="grid-stack-item"
-      :gs-id="widget.id"
+      :gs-id="String(widget.id)"
       :gs-x="widget.x"
       :gs-y="widget.y"
       :gs-w="widget.w"
@@ -38,27 +38,66 @@ const emit = defineEmits(['remove-widget', 'update-title', 'update-widget'])
 
 const gridContainer = ref(null)
 const grid = ref(null)
+const resizeObserver = ref(null)
+
+const GRID_OPTIONS = {
+  float: true,
+  cellHeight: 80,
+  margin: 6,
+  disableOneColumnMode: false,
+  alwaysShowResizeHandle: true,
+  handle: '.card-header'
+}
+
+const VIEWPORT_PADDING = 24
 
 function initGrid() {
   if (!gridContainer.value) return
-  grid.value = GridStack.init(
-    {
-      float: true,
-      cellHeight: 80,
-      margin: 6,
-      disableOneColumnMode: false
-    },
-    gridContainer.value
-  )
-  updateEditState(props.editable)
-
+  grid.value = GridStack.init(GRID_OPTIONS, gridContainer.value)
+  setEditable(props.editable)
+  rebuildGrid()
+  updateViewportMinHeight()
 }
 
-function updateEditState(isEditable) {
+function destroyGrid() {
+  if (!grid.value) return
+  grid.value.destroy(false)
+  grid.value = null
+}
+
+function setEditable(isEditable) {
   if (!grid.value) return
   grid.value.setStatic(!isEditable)
   grid.value.enableMove(isEditable)
   grid.value.enableResize(isEditable)
+}
+
+function rebuildGrid() {
+  if (!grid.value || !gridContainer.value) return
+  grid.value.batchUpdate()
+  grid.value.removeAll(false, false)
+
+  const elements = gridContainer.value.querySelectorAll('.grid-stack-item')
+  elements.forEach((el) => {
+    grid.value.makeWidget(el)
+  })
+
+  const layout = props.widgets.map((widget) => ({
+    id: String(widget.id),
+    x: widget.x,
+    y: widget.y,
+    w: widget.w || 1,
+    h: widget.h || 1,
+    autoPosition: widget.x == null || widget.y == null
+  }))
+
+  grid.value.load(layout, false)
+  grid.value.batchUpdate(false)
+}
+
+function saveLayout() {
+  if (!grid.value) return []
+  return grid.value.save(false)
 }
 
 function handleDelete(id) {
@@ -73,52 +112,13 @@ function handleUpdateWidget(payload) {
   emit('update-widget', payload)
 }
 
-function saveLayout() {
-  if (!grid.value) return []
-  return grid.value.save(false)
-}
-
-async function syncLayout() {
-  if (!grid.value) return
-  const widgetIds = new Set(props.widgets.map((widget) => String(widget.id)))
-  const existing = new Set(grid.value.engine.nodes.map((node) => String(node.id)))
-
-  // Remove nodes that no longer exist
-  grid.value.engine.nodes.forEach((node) => {
-    const nodeId = String(node.id)
-    if (!widgetIds.has(nodeId)) {
-      const el = gridContainer.value?.querySelector(`[gs-id="${nodeId}"]`)
-      if (el) {
-        grid.value.removeWidget(el, true)
-      }
-    }
-  })
-
-  // Add/update nodes without reloading the whole grid
-  props.widgets.forEach((widget) => {
-    const id = String(widget.id)
-    const el = gridContainer.value?.querySelector(`[gs-id="${id}"]`)
-    if (!el) return
-
-    if (!existing.has(id)) {
-      grid.value.makeWidget(el)
-      existing.add(id)
-    }
-
-    const updatePayload = {
-      w: widget.w,
-      h: widget.h
-    }
-
-    if (widget.x == null || widget.y == null) {
-      updatePayload.autoPosition = true
-    } else {
-      updatePayload.x = widget.x
-      updatePayload.y = widget.y
-    }
-
-    grid.value.update(el, updatePayload)
-  })
+function updateViewportMinHeight() {
+  if (!gridContainer.value) return
+  const rect = gridContainer.value.getBoundingClientRect()
+  const viewportHeight = window.innerHeight
+  const top = Math.max(0, rect.top)
+  const minHeight = Math.max(0, viewportHeight - top - VIEWPORT_PADDING)
+  gridContainer.value.style.setProperty('--dashboard-grid-min-height', `${minHeight}px`)
 }
 
 defineExpose({ saveLayout })
@@ -126,19 +126,25 @@ defineExpose({ saveLayout })
 onMounted(async () => {
   await nextTick()
   initGrid()
+  window.addEventListener('resize', updateViewportMinHeight)
+  if (gridContainer.value) {
+    resizeObserver.value = new ResizeObserver(updateViewportMinHeight)
+    resizeObserver.value.observe(gridContainer.value)
+  }
 })
 
 onBeforeUnmount(() => {
-  if (grid.value) {
-    grid.value.destroy(false)
-    grid.value = null
+  window.removeEventListener('resize', updateViewportMinHeight)
+  if (resizeObserver.value) {
+    resizeObserver.value.disconnect()
   }
+  destroyGrid()
 })
 
 watch(
   () => props.editable,
   (isEditable) => {
-    updateEditState(isEditable)
+    setEditable(isEditable)
   }
 )
 
@@ -146,7 +152,8 @@ watch(
   () => props.widgets,
   async () => {
     await nextTick()
-    await syncLayout()
+    rebuildGrid()
+    updateViewportMinHeight()
   },
   { deep: true }
 )
@@ -154,8 +161,7 @@ watch(
 
 <style scoped>
 .grid-stack {
-  background-color: rgb(255, 255, 255);
-  min-height: 480px;
+  min-height: var(--dashboard-grid-min-height, 320px);
 }
 
 .grid-stack-item-content {

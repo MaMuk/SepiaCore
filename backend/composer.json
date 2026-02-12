@@ -11,7 +11,8 @@
     "autoload": {
         "psr-4": {
             "SepiaCore\\Utilities\\": "src/Utilities/",
-            "SepiaCore\\Controllers\\": "src/Controllers/"
+            "SepiaCore\\Controllers\\": "src/Controllers/",
+            "SepiaCore\\Reports\\": "src/Reports/"
         }
     },
     "require": {

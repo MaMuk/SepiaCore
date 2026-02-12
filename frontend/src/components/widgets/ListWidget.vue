@@ -6,7 +6,12 @@
           <label class="form-label small text-muted">Entity</label>
           <select v-model="localEntity" class="form-select form-select-sm">
             <option value="">Select entity</option>
-            <option v-for="option in entityOptions" :key="option.value" :value="option.value">
+            <option
+              v-for="option in entityOptions"
+              :key="option.value"
+              :value="option.value"
+              :disabled="!option.allowed"
+            >
               {{ option.label }}
             </option>
           </select>
@@ -103,10 +108,15 @@ const localFilterLabel = ref('')
 
 const entityOptions = computed(() => {
   const entities = metadataStore.entities || {}
-  return Object.keys(entities).map(name => ({
-    value: name,
-    label: metadataStore.formatEntityName(name)
-  }))
+  const protectedEntities = metadataStore.protectedEntities || []
+  const protectedSet = new Set(protectedEntities.map((name) => name.toLowerCase()))
+  return Object.keys(entities)
+    .filter((name) => !protectedSet.has(name.toLowerCase()))
+    .map(name => ({
+      value: name,
+      label: metadataStore.formatEntityName(name),
+      allowed: isEntityAllowedForCapability(name, 'list-widget')
+    }))
 })
 
 const entityDisplayName = computed(() => {
@@ -160,10 +170,14 @@ const filterFieldOptions = computed(() => {
 
 const canRenderGrid = computed(() => {
   return !!localEntity.value && !!localFilterId.value && resolvedColumns.value.length > 0
+    && isEntityAllowedForCapability(localEntity.value, 'list-widget')
 })
 
 const guidanceMessage = computed(() => {
   if (!localEntity.value) return 'Select an entity to configure this list.'
+  if (!isEntityAllowedForCapability(localEntity.value, 'list-widget')) {
+    return 'You do not have access to view this entity in a list widget.'
+  }
   if (!localFilterId.value) return 'Select or save a stored filter to display data.'
   if (!resolvedColumns.value.length) return 'Select at least one column to display.'
   return ''
@@ -670,6 +684,35 @@ function formatFieldName(field) {
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
+}
+
+function toBoolean(value) {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+function isEntityAllowedForCapability(entityName, capabilityKey) {
+  const entityMeta = metadataStore.getEntityMetadata(entityName)
+  if (!entityMeta) return false
+
+  const capability = entityMeta.capabilities?.[capabilityKey]
+  let active = true
+  let requiresAdmin = false
+
+  if (capability !== undefined) {
+    if (typeof capability === 'boolean' || typeof capability === 'string') {
+      active = toBoolean(capability)
+    } else if (typeof capability === 'object') {
+      if (capability.active !== undefined) {
+        active = toBoolean(capability.active)
+      }
+      if (capability.requires_admin !== undefined) {
+        requiresAdmin = toBoolean(capability.requires_admin)
+      }
+    }
+  }
+
+  if (requiresAdmin && !authStore.isAdmin) return false
+  return active
 }
 </script>
 

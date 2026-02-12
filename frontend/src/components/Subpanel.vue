@@ -52,6 +52,7 @@
                 :relationship="relationship[record.id]?.[fieldName]"
                 :mode="'detail'"
                 :form-id="`subpanel-${subpanelKey}-${record.id}`"
+                :entity-name="subpanelDef.entity"
                 @relationship-click="handleRelationshipClick"
               />
             </td>
@@ -266,4 +267,3 @@ function handleRelationshipAdded() {
   padding: 0.25rem 0.5rem;
 }
 </style>
-

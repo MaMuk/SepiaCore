@@ -247,6 +247,10 @@ const props = defineProps({
   initialFilterId: {
     type: [String, Number],
     default: null
+  },
+  initialFilters: {
+    type: [Object, Array],
+    default: null
   }
 })
 
@@ -456,6 +460,13 @@ watch(() => props.initialFilterId, (next) => {
     return
   }
   applyInitialFilterSelection(next)
+}, { immediate: true })
+
+watch(() => props.initialFilters, (next) => {
+  if (!next || props.requireStored) return
+  builderGroup.value = normalizeFilterDefinition(next)
+  mode.value = 'builder'
+  scheduleBuilderEmit()
 }, { immediate: true })
 
 onBeforeUnmount(() => {

@@ -2,6 +2,30 @@
   --bs-body-bg: #f8f9fa;
   --pane-bg-color: #f2f4f8;
   --actionbar-bg-color: #f5f5f5;
+  --navbar-bg: #ffffff;
+  --navbar-button-bg: #ffffff;
+  --navbar-shadow-color: rgba(0, 0, 0, 0.1);
+  --navbar-border-soft: rgba(15, 23, 42, 0.1);
+  --navbar-dropdown-shadow: rgba(15, 23, 42, 0.12);
+  --navbar-pill-bg: #f1f5ff;
+  --navbar-dropdown-bg: #f1f5ff;
+  --navbar-pill-border: rgba(47, 91, 255, 0.2);
+  --navbar-icon-color: #334155;
+  --navbar-icon-hover-color: #1e3a8a;
+  --navbar-focus-ring: rgba(47, 91, 255, 0.35);
+  --navbar-active-shadow: rgba(12, 26, 75, 0.08);
+  --navbar-active-border: rgba(47, 91, 255, 0.35);
+  --navbar-active-color: #2f5bff;
+  --navbar-empty-bg: #fff7e6;
+  --navbar-empty-border: rgba(245, 158, 11, 0.35);
+  --navbar-empty-text: #92400e;
+  --navbar-empty-subtitle: #b45309;
+  --navbar-empty-shadow: rgba(180, 83, 9, 0.12);
+  --navbar-cta-bg: #f59e0b;
+  --navbar-cta-text: #1f2937;
+  --navbar-cta-hover-bg: #fbbf24;
+  --navbar-cta-hover-shadow: rgba(180, 83, 9, 0.18);
+  --navbar-cta-focus-ring: rgba(245, 158, 11, 0.35);
 }
 
 body {

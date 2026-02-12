@@ -130,6 +130,7 @@
                     <tr>
                       <th>Field Name</th>
                       <th>Field Type</th>
+                      <th>Options</th>
                       <th style="width: 100px;">Actions</th>
                     </tr>
                   </thead>
@@ -137,6 +138,7 @@
                     <tr v-for="(field, index) in defaultFields" :key="`default-${index}`">
                       <td>{{ field.name }}</td>
                       <td>{{ field.type }}</td>
+                      <td></td>
                       <td></td>
                     </tr>
                     <tr v-for="(field, index) in customFields" :key="`custom-${index}`">
@@ -156,7 +158,27 @@
                           <option value="number">number</option>
                           <option value="select">select</option>
                           <option value="multiselect">multiselect</option>
+                          <option value="file">file</option>
                         </select>
+                      </td>
+                      <td>
+                        <div v-if="field.type === 'file'" class="d-flex flex-column gap-1">
+                          <input
+                            type="text"
+                            class="form-control form-control-sm"
+                            placeholder="Allowed types (comma-separated)"
+                            v-model="field.allowedTypesInput"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            class="form-control form-control-sm"
+                            placeholder="Max size (MB)"
+                            v-model="field.maxSizeMB"
+                          />
+                        </div>
+                        <span v-else class="text-muted">-</span>
                       </td>
                       <td>
                         <button
@@ -283,6 +305,12 @@ function sanitizeInput(input) {
   return input.replace(/[^a-zA-Z]/g, '')
 }
 
+function mbToBytes(value) {
+  const numeric = parseFloat(value)
+  if (Number.isNaN(numeric) || numeric <= 0) return null
+  return Math.round(numeric * 1024 * 1024)
+}
+
 function handleEntityNameInput(event) {
   const rawValue = event.target.value
   const cleanValue = sanitizeInput(rawValue)
@@ -369,7 +397,9 @@ function handleTypeChange() {
 function addCustomField() {
   customFields.value.push({
     name: '',
-    type: 'text'
+    type: 'text',
+    allowedTypesInput: '',
+    maxSizeMB: ''
   })
 }
 
@@ -390,10 +420,29 @@ async function handleSubmit() {
     // Only send custom fields - backend automatically adds default fields (id, name/first_name/last_name, date_created, date_modified, owner)
     const fields = customFields.value
       .filter(f => f.name.trim() && f.type)
-      .map(field => ({
-        name: field.name.trim(),
-        type: field.type
-      }))
+      .map(field => {
+        const fieldDef = {
+          name: field.name.trim(),
+          type: field.type
+        }
+
+        if (field.type === 'file') {
+          const allowedTypes = field.allowedTypesInput
+            ? field.allowedTypesInput.split(',').map(item => item.trim()).filter(Boolean)
+            : []
+          if (allowedTypes.length > 0) {
+            fieldDef.allowedTypes = allowedTypes
+          }
+
+          const maxSize = mbToBytes(field.maxSizeMB)
+          if (maxSize) {
+            fieldDef.maxSize = maxSize
+          }
+
+        }
+
+        return fieldDef
+      })
 
     // Default views structure
     const views = {

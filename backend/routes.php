@@ -13,6 +13,8 @@ use SepiaCore\Controllers\OpenApiController;
 use SepiaCore\Controllers\UsersController;
 use SepiaCore\Controllers\DashboardController;
 use SepiaCore\Controllers\FiltersController;
+use SepiaCore\Controllers\FilesController;
+use SepiaCore\Controllers\ReportsController;
 
 // ==========================================
 // Public Routes (No Authentication)
@@ -76,6 +78,25 @@ Flight::route('PUT /settings', function() {
 Flight::route('GET /system/components/@component', function($component) {
     $controller = new SystemController();
     $controller->component($component);
+});
+
+// ==========================================
+// Reporting Routes
+// ==========================================
+
+Flight::route('POST /system/reports/run', function() {
+    $controller = new ReportsController();
+    $controller->run();
+});
+
+Flight::route('GET /system/reports/options', function() {
+    $controller = new ReportsController();
+    $controller->options();
+});
+
+Flight::route('POST /system/reports/validate', function() {
+    $controller = new ReportsController();
+    $controller->validate();
 });
 
 // ==========================================
@@ -311,6 +332,25 @@ Flight::route('GET /subpanel/many_to_many/@parentModel/@parentId/@relEntity/@rel
         $controller->manyToMany($parentModel, $parentId, $relEntity, $relName);
     }
 );
+
+// ==========================================
+// File Routes
+// ==========================================
+
+Flight::route('POST /system/files', function() {
+    $controller = new FilesController();
+    $controller->upload();
+});
+
+Flight::route('GET /system/files/@id/metadata', function($id) {
+    $controller = new FilesController();
+    $controller->metadata($id);
+});
+
+Flight::route('GET /system/files/@id', function($id) {
+    $controller = new FilesController();
+    $controller->download($id);
+});
 
 // ==========================================
 // Entity CRUD Routes

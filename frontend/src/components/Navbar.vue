@@ -16,7 +16,7 @@
             id="userDropdown"
             :aria-expanded="openUserDropdown"
             aria-haspopup="true"
-            @click="toggleUserDropdown"
+            @click="toggleUserDropdown($event)"
           >
             <i class="bi bi-person-fill"></i>
 <!--              <span>{{ username }}</span>-->
@@ -25,16 +25,23 @@
             :class="{ show: openUserDropdown }"
             class="navbar-dropdown"
             aria-labelledby="userDropdown"
+            :style="dropdownInlineStyles.user"
           >
             <li>
-              <a class="dropdown-item" href="#" @click.prevent="handleSettings">
-                <i class="bi bi-gear-fill me-2"></i>Settings
+              <a class="dropdown-item dropdown-item-grouped" href="#" @click.prevent="handleSettings">
+                <span class="dropdown-item-icon" aria-hidden="true">
+                  <i class="bi bi-gear-fill"></i>
+                </span>
+                <span class="dropdown-item-text">Settings</span>
               </a>
             </li>
             <li><hr class="dropdown-divider"></li>
             <li>
-              <a class="dropdown-item" href="#" @click.prevent="handleLogout">
-                <i class="bi bi-box-arrow-right me-2"></i>Logout
+              <a class="dropdown-item dropdown-item-grouped" href="#" @click.prevent="handleLogout">
+                <span class="dropdown-item-icon" aria-hidden="true">
+                  <i class="bi bi-box-arrow-right"></i>
+                </span>
+                <span class="dropdown-item-text">Logout</span>
               </a>
             </li>
           </ul>
@@ -104,7 +111,7 @@
                 title="Open Dropdown Menu"
                 aria-haspopup="true"
                 :aria-expanded="Boolean(openDropdowns[entity.name])"
-                @click="toggleDropdown(entity.name)"
+                @click="toggleDropdown(entity.name, $event)"
               >
                 <i
                   :class="getCaretClass(entity.name)"
@@ -117,14 +124,18 @@
               :class="{ show: openDropdowns[entity.name] }"
               class="navbar-dropdown entity-dropdown"
               :aria-labelledby="`entityDropdown-${entity.name}`"
+              :style="dropdownInlineStyles[entity.name]"
             >
               <li>
                 <a
-                  class="dropdown-item"
+                  class="dropdown-item dropdown-item-grouped"
                   href="#"
                   @click.prevent="handleCreate(entity.name)"
                 >
-                  Create
+                  <span class="dropdown-item-icon" aria-hidden="true">
+                    <i class="bi bi-plus-lg"></i>
+                  </span>
+                  <span class="dropdown-item-text">Create</span>
                 </a>
               </li>
             </ul>
@@ -136,7 +147,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
@@ -164,6 +175,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 const openDropdowns = ref({})
 const openUserDropdown = ref(false)
 const isNavOpen = ref(false)
+const dropdownInlineStyles = ref({})
 
 onMounted(async () => {
   if (!metadataStore.metadata) {
@@ -202,17 +214,70 @@ function toggleNav() {
   }
 }
 
-function toggleDropdown(entityName) {
+function getDropdownElement(target) {
+  if (!target) {
+    return null
+  }
+
+  const dropdownRoot = target.closest('.dropdown')
+  if (!dropdownRoot) {
+    return null
+  }
+
+  return dropdownRoot.querySelector('.navbar-dropdown')
+}
+
+async function setDropdownInlineStyle(key, target) {
+  if (!target) {
+    return
+  }
+
+  await nextTick()
+
+  const dropdownElement = getDropdownElement(target)
+  const dropdownWidth = dropdownElement?.offsetWidth || 0
+  const { left, right } = target.getBoundingClientRect()
+  const viewportWidth = window.innerWidth || 0
+  const leftOverflows = dropdownWidth > 0 && left + dropdownWidth > viewportWidth
+  const rightOverflows = dropdownWidth > 0 && right - dropdownWidth < 0
+
+  if (leftOverflows && rightOverflows) {
+    const navbarRect = navbarElement.value?.getBoundingClientRect()
+    const navbarCenter = navbarRect ? navbarRect.left + navbarRect.width / 2 : viewportWidth / 2
+    dropdownInlineStyles.value[key] = {
+      left: `${navbarCenter}px`,
+      right: 'auto',
+      transform: 'translateX(-50%)'
+    }
+    return
+  }
+
+  dropdownInlineStyles.value[key] = leftOverflows
+    ? {
+        right: `${Math.max(viewportWidth - right, 0)}px`,
+        left: 'auto',
+        transform: 'none'
+      }
+    : {
+        left: `${left}px`,
+        right: 'auto',
+        transform: 'none'
+      }
+}
+
+function toggleDropdown(entityName, event) {
   openDropdowns.value[entityName] = !openDropdowns.value[entityName]
   if (openDropdowns.value[entityName]) {
     openUserDropdown.value = false
+    setDropdownInlineStyle(entityName, event?.currentTarget)
   }
 }
 
-function toggleUserDropdown() {
+function toggleUserDropdown(event) {
   openUserDropdown.value = !openUserDropdown.value
   if (openUserDropdown.value) {
     closeEntityDropdowns()
+    setDropdownInlineStyle('user', event?.currentTarget)
   }
 }
 
@@ -255,7 +320,7 @@ async function handleLogout() {
 
 <style scoped>
 .navbar {
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px var(--navbar-shadow-color);
   position: fixed;
   top: 0;
   left: 0;
@@ -327,10 +392,15 @@ async function handleLogout() {
   min-width: 14rem;
   padding: 0.5rem;
   border-radius: 0 0 0.9rem 0.9rem;
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  border: 1px solid var(--navbar-border-soft);
   border-top: 0;
-  background: #fff;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+  background: linear-gradient(
+    to bottom,
+    var(--navbar-button-bg) 0,
+    var(--navbar-dropdown-bg) 12px,
+    var(--navbar-dropdown-bg) 100%
+  );
+  box-shadow: 0 16px 40px var(--navbar-dropdown-shadow);
   z-index: 1060;
   list-style: none;
   padding-left: 0;
@@ -347,7 +417,49 @@ async function handleLogout() {
 
 .navbar-dropdown .dropdown-item:hover,
 .navbar-dropdown .dropdown-item:focus {
-  background: #f1f5ff;
+  background: var(--navbar-dropdown-bg);
+}
+
+.navbar-dropdown .dropdown-item.dropdown-item-grouped {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--navbar-pill-border);
+  background: var(--navbar-button-bg);
+  color: var(--navbar-icon-color);
+  text-decoration: none;
+}
+
+.navbar-dropdown .dropdown-item.dropdown-item-grouped .dropdown-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-right: 1px solid var(--navbar-pill-border);
+  border-radius: 999px 0 0 999px;
+}
+
+.navbar-dropdown .dropdown-item.dropdown-item-grouped .dropdown-item-text {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.95rem;
+  height: 42px;
+  font-weight: 600;
+  border-radius: 0 999px 999px 0;
+}
+
+.navbar-dropdown .dropdown-item.dropdown-item-grouped:hover,
+.navbar-dropdown .dropdown-item.dropdown-item-grouped:focus {
+  background: var(--navbar-pill-bg);
+  color: var(--navbar-icon-hover-color);
+}
+
+.navbar-dropdown .dropdown-item.dropdown-item-grouped:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--navbar-focus-ring);
 }
 
 .navbar-dropdown .dropdown-divider {
@@ -397,14 +509,14 @@ async function handleLogout() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid var(--navbar-border-soft);
+  background: var(--navbar-bg);
+  color: var(--navbar-icon-color);
   transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, color 120ms ease;
 }
-.icon-btn:hover { background: #f1f5ff; color: #1e3a8a; }
-.icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47, 91, 255, 0.35); }
-.icon-btn.active { background: #fff; box-shadow: 0 6px 20px rgba(12, 26, 75, 0.08); border-color: rgba(47, 91, 255, 0.35); color: #2f5bff; }
+.icon-btn:hover { background: var(--navbar-pill-bg); color: var(--navbar-icon-hover-color); }
+.icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--navbar-focus-ring); }
+.icon-btn.active { background: var(--navbar-bg); box-shadow: 0 6px 20px var(--navbar-active-shadow); border-color: var(--navbar-active-border); color: var(--navbar-active-color); }
 
 .icon-btn-round {
   border-radius: 999px;
@@ -432,15 +544,15 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #f1f5ff;
+  background: var(--navbar-pill-bg);
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(47, 91, 255, 0.2);
+  border: 1px solid var(--navbar-pill-border);
 }
 
 .entity-button-group {
-  background: #f1f5ff;
-  border: 1px solid rgba(47, 91, 255, 0.2);
+  background: var(--navbar-pill-bg);
+  border: 1px solid var(--navbar-pill-border);
   border-radius: 999px;
   padding: 6px;
 }
@@ -449,12 +561,12 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  background: #fff7e6;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: var(--navbar-empty-bg);
+  border: 1px solid var(--navbar-empty-border);
   border-radius: 999px;
   padding: 0.35rem 0.9rem;
-  color: #92400e;
-  box-shadow: 0 8px 20px rgba(180, 83, 9, 0.12);
+  color: var(--navbar-empty-text);
+  box-shadow: 0 8px 20px var(--navbar-empty-shadow);
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -490,14 +602,14 @@ async function handleLogout() {
 
 .nav-empty-subtitle {
   font-size: 0.78rem;
-  color: #b45309;
+  color: var(--navbar-empty-subtitle);
   flex: 0 0 auto;
 }
 
 .nav-empty-cta {
   border: none;
-  background: #f59e0b;
-  color: #1f2937;
+  background: var(--navbar-cta-bg);
+  color: var(--navbar-cta-text);
   font-weight: 600;
   border-radius: 999px;
   padding: 0.35rem 0.85rem;
@@ -506,14 +618,14 @@ async function handleLogout() {
 }
 
 .nav-empty-cta:hover {
-  background: #fbbf24;
-  box-shadow: 0 8px 16px rgba(180, 83, 9, 0.18);
+  background: var(--navbar-cta-hover-bg);
+  box-shadow: 0 8px 16px var(--navbar-cta-hover-shadow);
   transform: translateY(-1px);
 }
 
 .nav-empty-cta:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 0 3px var(--navbar-cta-focus-ring);
 }
 
 @media (max-width: 767.98px) {

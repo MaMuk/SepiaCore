@@ -3,6 +3,7 @@
 /backend/*.db
 /backend/*.log
 /backend/config/*.php
+/backend/upload/
 /backend/Entities/
 !/backend/Entities/BaseEntity.php
 !/backend/Entities/Dashboards/
@@ -12,6 +13,7 @@
 !/backend/Entities/Tokens/
 !/backend/Entities/Users/
 !/backend/Entities/Saved_filters/
+!/backend/Entities/Files/
 /.idea
 /frontend/node_modules/
 /frontend/dist/

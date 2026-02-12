@@ -41,6 +41,11 @@ export function formatFieldValue(value, fieldDef, relationship = null) {
     return '-'
   }
 
+  // File field
+  if (fieldType === 'file') {
+    return value ? 'File' : '-'
+  }
+
   // Datetime field
   if (fieldType === 'datetime') {
     if (!value) return '-'
@@ -147,6 +152,11 @@ export function formatFieldValueHTML(value, fieldDef, relationship = null, onCli
       return `<span class="text-muted">${relationship.id}</span>`
     }
     return '<span class="text-muted">-</span>'
+  }
+
+  // File field
+  if (fieldType === 'file') {
+    return value ? '<span class="text-muted">File</span>' : '<span class="text-muted">-</span>'
   }
 
   // Datetime field

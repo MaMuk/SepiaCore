@@ -38,6 +38,8 @@
 import { ref, watch, computed } from 'vue'
 import ActionConsole from '../widgets/ActionConsole.vue'
 import ListWidget from '../widgets/ListWidget.vue'
+import GraphWidget from '../widgets/GraphWidget.vue'
+import QuickFormWidget from '../widgets/QuickFormWidget.vue'
 
 const props = defineProps({
   widget: { type: Object, required: true },
@@ -55,11 +57,29 @@ const widgetComponent = computed(() => {
   if (props.widget.type === 'action-console') {
     return ActionConsole
   }
+  if (props.widget.type === 'graph') {
+    return GraphWidget
+  }
+  if (props.widget.type === 'quickForm') {
+    return QuickFormWidget
+  }
   return null
 })
 
 const widgetProps = computed(() => {
   if (props.widget.type === 'list') {
+    return {
+      widget: props.widget,
+      editable: props.editable
+    }
+  }
+  if (props.widget.type === 'graph') {
+    return {
+      widget: props.widget,
+      editable: props.editable
+    }
+  }
+  if (props.widget.type === 'quickForm') {
     return {
       widget: props.widget,
       editable: props.editable
@@ -87,9 +107,22 @@ function handleUpdateWidget(payload) {
 <style scoped>
 .dashboard-widget {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .widget-title-input {
   min-width: 140px;
+}
+
+.dashboard-widget :deep(.card-header) {
+  flex: 0 0 auto;
+}
+
+.dashboard-widget :deep(.card-body) {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 </style>

@@ -511,6 +511,7 @@ class EntityStudioController extends BaseController
         // 2. Create new fields or update existing ones
         $entityKey = $entityClass->getEntityKey();
         foreach ($fieldsArray as $fieldName => $fieldDef) {
+            $this->validateFileFieldDefinition($fieldName, $fieldDef);
             if (!array_key_exists($fieldName, $existingFields)) {
                 // Validate field name before creating
                 $this->validateFieldName($fieldName);
@@ -582,6 +583,8 @@ class EntityStudioController extends BaseController
             throw new \Exception("Field type not specified for '$fieldName'");
         }
 
+        $this->validateFileFieldDefinition($fieldName, $fieldDef);
+
         $entityKey = $entityClass->getEntityKey();
         $tableName = $entityClass->getTableName();
 
@@ -625,6 +628,31 @@ class EntityStudioController extends BaseController
 
         if ($writeMetaData) {
             $this->updateMetaDataFile('EntireFile');
+        }
+    }
+
+    /**
+     * Validates file field naming convention.
+     * @param string $fieldName Field name
+     * @return void
+     */
+    private function validateFileFieldName(string $fieldName): void
+    {
+        if (!preg_match('/^file[1-9][0-9]*$/', $fieldName)) {
+            throw new \Exception("File field names must be enumerated as file1, file2, file3, etc.");
+        }
+    }
+
+    /**
+     * Validates file field definitions when type is file.
+     * @param string $fieldName Field name
+     * @param array $fieldDef Field definition
+     * @return void
+     */
+    private function validateFileFieldDefinition(string $fieldName, array $fieldDef): void
+    {
+        if (($fieldDef['type'] ?? null) === 'file') {
+            $this->validateFileFieldName($fieldName);
         }
     }
 
@@ -688,6 +716,7 @@ class EntityStudioController extends BaseController
 
         switch ($type) {
             case 'uuid':
+            case 'file':
                 $table->uuid($name)->nullable();
                 break;
             case 'datetime':
@@ -861,6 +890,21 @@ PHP;
                     'requires_admin' => false,
                 ],
             'list-filter-suggestions' =>
+                [
+                    'active' => 'true',
+                    'requires_admin' => false,
+                ],
+            'list-widget' =>
+                [
+                    'active' => 'true',
+                    'requires_admin' => false,
+                ],
+            'quick-form' =>
+                [
+                    'active' => 'true',
+                    'requires_admin' => false,
+                ],
+            'graph-widget' =>
                 [
                     'active' => 'true',
                     'requires_admin' => false,

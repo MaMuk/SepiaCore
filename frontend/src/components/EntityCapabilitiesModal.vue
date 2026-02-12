@@ -69,6 +69,84 @@
               </label>
             </div>
           </div>
+
+          <div class="mb-3">
+            <h6 class="text-muted">Quick Form</h6>
+            <div class="form-check">
+              <input
+                id="cap-quick-form-active"
+                v-model="quickFormActive"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-quick-form-active">
+                Allow quick form creation
+              </label>
+            </div>
+            <div class="form-check mt-2">
+              <input
+                id="cap-quick-form-admin"
+                v-model="quickFormRequiresAdmin"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-quick-form-admin">
+                Requires admin
+              </label>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <h6 class="text-muted">List Widget</h6>
+            <div class="form-check">
+              <input
+                id="cap-list-widget-active"
+                v-model="listWidgetActive"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-list-widget-active">
+                Allow list widget
+              </label>
+            </div>
+            <div class="form-check mt-2">
+              <input
+                id="cap-list-widget-admin"
+                v-model="listWidgetRequiresAdmin"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-list-widget-admin">
+                Requires admin
+              </label>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <h6 class="text-muted">Graph Widget</h6>
+            <div class="form-check">
+              <input
+                id="cap-graph-widget-active"
+                v-model="graphWidgetActive"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-graph-widget-active">
+                Allow graph reporting
+              </label>
+            </div>
+            <div class="form-check mt-2">
+              <input
+                id="cap-graph-widget-admin"
+                v-model="graphWidgetRequiresAdmin"
+                class="form-check-input"
+                type="checkbox"
+              />
+              <label class="form-check-label" for="cap-graph-widget-admin">
+                Requires admin
+              </label>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="close" :disabled="saving">
@@ -115,6 +193,12 @@ const actionConsoleActive = ref(true)
 const actionConsoleRequiresAdmin = ref(false)
 const listFilterSuggestionsActive = ref(true)
 const listFilterSuggestionsRequiresAdmin = ref(false)
+const quickFormActive = ref(true)
+const quickFormRequiresAdmin = ref(false)
+const listWidgetActive = ref(true)
+const listWidgetRequiresAdmin = ref(false)
+const graphWidgetActive = ref(true)
+const graphWidgetRequiresAdmin = ref(false)
 
 const isVisible = computed({
   get: () => props.modelValue,
@@ -160,11 +244,20 @@ function loadCapabilities() {
   const capabilities = props.entity?.capabilities || {}
   const actionConsole = normalizeCapability(capabilities['action-console'])
   const listFilter = normalizeCapability(capabilities['list-filter-suggestions'])
+  const quickForm = normalizeCapability(capabilities['quick-form'])
+  const listWidget = normalizeCapability(capabilities['list-widget'])
+  const graphWidget = normalizeCapability(capabilities['graph-widget'])
 
   actionConsoleActive.value = actionConsole.active
   actionConsoleRequiresAdmin.value = actionConsole.requires_admin
   listFilterSuggestionsActive.value = listFilter.active
   listFilterSuggestionsRequiresAdmin.value = listFilter.requires_admin
+  quickFormActive.value = quickForm.active
+  quickFormRequiresAdmin.value = quickForm.requires_admin
+  listWidgetActive.value = listWidget.active
+  listWidgetRequiresAdmin.value = listWidget.requires_admin
+  graphWidgetActive.value = graphWidget.active
+  graphWidgetRequiresAdmin.value = graphWidget.requires_admin
 }
 
 function buildCapabilitiesPayload() {
@@ -176,6 +269,18 @@ function buildCapabilitiesPayload() {
   base['list-filter-suggestions'] = {
     active: listFilterSuggestionsActive.value,
     requires_admin: listFilterSuggestionsRequiresAdmin.value
+  }
+  base['quick-form'] = {
+    active: quickFormActive.value,
+    requires_admin: quickFormRequiresAdmin.value
+  }
+  base['list-widget'] = {
+    active: listWidgetActive.value,
+    requires_admin: listWidgetRequiresAdmin.value
+  }
+  base['graph-widget'] = {
+    active: graphWidgetActive.value,
+    requires_admin: graphWidgetRequiresAdmin.value
   }
   return base
 }

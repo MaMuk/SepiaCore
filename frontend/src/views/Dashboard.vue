@@ -190,6 +190,17 @@ function handleAddWidget() {
       columns: []
     }
   }
+  if (type === 'graph') {
+    newWidget.config = {
+      reportDefinition: null
+    }
+  }
+  if (type === 'quickForm') {
+    newWidget.config = {
+      entity: '',
+      fields: []
+    }
+  }
   widgets.value = [...widgets.value, newWidget]
 }
 

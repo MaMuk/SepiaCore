@@ -33,6 +33,9 @@
               <div class="form-text">
                 Field name cannot be changed
               </div>
+              <div v-if="editFieldErrors.fileName" class="text-danger small mt-1">
+                {{ editFieldErrors.fileName }}
+              </div>
             </div>
             <div class="col-md-2">
               <label for="editFieldType" class="form-label">Type</label>
@@ -105,6 +108,80 @@
                   <i class="bi bi-plus me-1"></i>Add Option
                 </button>
               </div>
+            </div>
+            <div v-if="editingField.def.type === 'file'" class="col-md-4">
+              <label class="form-label">Allowed Types</label>
+              <div class="d-flex gap-2 mb-2">
+                <select
+                  class="form-select form-select-sm"
+                  v-model="editAllowedTypeSelection"
+                >
+                  <option value="">Select type...</option>
+                  <option
+                    v-for="type in commonMimeTypes"
+                    :key="type.value"
+                    :value="type.value"
+                  >
+                    {{ type.label }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  @click="addEditCommonAllowedType"
+                >
+                  Add
+                </button>
+              </div>
+              <div class="d-flex gap-2 mb-2">
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  placeholder="Custom MIME type"
+                  v-model="editAllowedTypeCustom"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  @click="addEditCustomAllowedType"
+                >
+                  Add
+                </button>
+              </div>
+              <div class="select-options-container">
+                <div
+                  v-for="(type, index) in editingFieldFileMeta.allowedTypes"
+                  :key="index"
+                  class="d-flex gap-2 mb-2"
+                >
+                  <input
+                    type="text"
+                    class="form-control form-control-sm"
+                    placeholder="image/png"
+                    v-model="editingFieldFileMeta.allowedTypes[index]"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-danger"
+                    @click="removeEditAllowedType(index)"
+                  >
+                    <i class="bi bi-x"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="form-text">
+                Use MIME types like image/png or image/*.
+              </div>
+            </div>
+            <div v-if="editingField.def.type === 'file'" class="col-md-2">
+              <label class="form-label">Max Size (MB)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                class="form-control"
+                v-model="editingFieldFileMeta.maxSizeMB"
+              />
             </div>
             <div class="col-md-2">
               <label class="form-label">&nbsp;</label>
@@ -237,6 +314,80 @@
                   <i class="bi bi-plus me-1"></i>Add Option
                 </button>
               </div>
+            </div>
+            <div v-if="newField.type === 'file'" class="col-md-4">
+              <label class="form-label">Allowed Types</label>
+              <div class="d-flex gap-2 mb-2">
+                <select
+                  class="form-select form-select-sm"
+                  v-model="newAllowedTypeSelection"
+                >
+                  <option value="">Select type...</option>
+                  <option
+                    v-for="type in commonMimeTypes"
+                    :key="type.value"
+                    :value="type.value"
+                  >
+                    {{ type.label }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  @click="addCommonAllowedType"
+                >
+                  Add
+                </button>
+              </div>
+              <div class="d-flex gap-2 mb-2">
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  placeholder="Custom MIME type"
+                  v-model="newAllowedTypeCustom"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  @click="addCustomAllowedType"
+                >
+                  Add
+                </button>
+              </div>
+              <div class="select-options-container">
+                <div
+                  v-for="(type, index) in newField.allowedTypes"
+                  :key="index"
+                  class="d-flex gap-2 mb-2"
+                >
+                  <input
+                    type="text"
+                    class="form-control form-control-sm"
+                    placeholder="image/png"
+                    v-model="newField.allowedTypes[index]"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-danger"
+                    @click="removeAllowedType(index)"
+                  >
+                    <i class="bi bi-x"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="form-text">
+                Use MIME types like image/png or image/*.
+              </div>
+            </div>
+            <div v-if="newField.type === 'file'" class="col-md-2">
+              <label class="form-label">Max Size (MB)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                class="form-control"
+                v-model="newField.maxSizeMB"
+              />
             </div>
             <div class="col-md-2">
               <label class="form-label">&nbsp;</label>
@@ -403,9 +554,18 @@ const saving = ref(false)
 const hasChanges = ref(false)
 const editingField = ref(null)
 const editingFieldOptions = ref([])
-const editFieldErrors = ref({
-  entity: null
+const editingFieldFileMeta = ref({
+  allowedTypes: [],
+  maxSizeMB: ''
 })
+const editFieldErrors = ref({
+  entity: null,
+  fileName: null
+})
+const newAllowedTypeSelection = ref('')
+const newAllowedTypeCustom = ref('')
+const editAllowedTypeSelection = ref('')
+const editAllowedTypeCustom = ref('')
 
 const fieldTypes = [
   'text',
@@ -414,6 +574,7 @@ const fieldTypes = [
   'date',
   'select',
   'collection',
+  'file',
   'checkbox',
   'boolean',
   'int',
@@ -429,7 +590,9 @@ const newField = ref({
   type: 'text',
   readonly: false,
   entity: '',
-  options: []
+  options: [],
+  allowedTypes: [],
+  maxSizeMB: ''
 })
 
 const newFieldErrors = ref({
@@ -441,6 +604,57 @@ const reservedKeywords = [
   'select', 'from', 'where', 'group', 'order', 'limit', 'join', 'table', 'user',
   'index', 'primary', 'key', 'foreign', 'by', 'as', 'into', 'and', 'or', 'not', 'null'
 ]
+
+const commonMimeTypes = [
+  { label: 'PDF', value: 'application/pdf' },
+  { label: 'Word (.doc)', value: 'application/msword' },
+  { label: 'Word (.docx)', value: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  { label: 'Excel (.xls)', value: 'application/vnd.ms-excel' },
+  { label: 'Excel (.xlsx)', value: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  { label: 'PowerPoint (.ppt)', value: 'application/vnd.ms-powerpoint' },
+  { label: 'PowerPoint (.pptx)', value: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+  { label: 'CSV', value: 'text/csv' },
+  { label: 'Text', value: 'text/plain' },
+  { label: 'PNG', value: 'image/png' },
+  { label: 'JPEG', value: 'image/jpeg' },
+  { label: 'GIF', value: 'image/gif' },
+  { label: 'WebP', value: 'image/webp' },
+  { label: 'SVG', value: 'image/svg+xml' },
+  { label: 'ZIP', value: 'application/zip' },
+  { label: '7z', value: 'application/x-7z-compressed' },
+  { label: 'RAR', value: 'application/x-rar-compressed' }
+]
+
+const fileFieldNamePattern = /^file[1-9][0-9]*$/
+
+function isFileFieldName(name) {
+  return fileFieldNamePattern.test(name)
+}
+
+function normalizeAllowedTypes(types) {
+  if (!Array.isArray(types)) return []
+  return types.map(type => type.trim()).filter(Boolean)
+}
+
+function addAllowedTypeValue(targetList, value) {
+  const trimmed = value.trim()
+  if (!trimmed) return
+  if (!targetList.includes(trimmed)) {
+    targetList.push(trimmed)
+  }
+}
+
+function mbToBytes(value) {
+  const numeric = parseFloat(value)
+  if (Number.isNaN(numeric) || numeric <= 0) return null
+  return Math.round(numeric * 1024 * 1024)
+}
+
+function bytesToMb(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return ''
+  return (numeric / (1024 * 1024)).toFixed(2)
+}
 
 const entityDisplayName = computed(() => {
   return props.entity.displayName || metadataStore.formatEntityName(props.entity.name)
@@ -466,14 +680,16 @@ const canAddField = computed(() => {
   return newField.value.name.trim() !== '' &&
          !newFieldErrors.value.name &&
          (newField.value.type !== 'relationship' || newField.value.entity) &&
-         (newField.value.type !== 'select' || newField.value.options.length > 0)
+         (newField.value.type !== 'select' || newField.value.options.length > 0) &&
+         (newField.value.type !== 'file' || isFileFieldName(newField.value.name.trim()))
 })
 
 const canSaveEdit = computed(() => {
   if (!editingField.value) return false
   
   return (editingField.value.def.type !== 'relationship' || editingField.value.def.entity) &&
-         (editingField.value.def.type !== 'select' || editingFieldOptions.value.length > 0)
+         (editingField.value.def.type !== 'select' || editingFieldOptions.value.length > 0) &&
+         (editingField.value.def.type !== 'file' || isFileFieldName(editingField.value.name))
 })
 
 function formatEntityName(name) {
@@ -508,6 +724,10 @@ function validateNewFieldName() {
   if (!newFieldErrors.value.name && fields.value.some(f => f.name === name)) {
     newFieldErrors.value.name = 'Field already exists'
   }
+
+  if (!newFieldErrors.value.name && newField.value.type === 'file' && !isFileFieldName(name)) {
+    newFieldErrors.value.name = 'File fields must be named file1, file2, file3, etc.'
+  }
 }
 
 function validateNewField() {
@@ -526,10 +746,19 @@ function handleTypeChange() {
   } else if (newField.value.type !== 'select') {
     newField.value.options = []
   }
+
+  if (newField.value.type === 'file' && newField.value.allowedTypes.length === 0) {
+    newField.value.allowedTypes = []
+  } else if (newField.value.type !== 'file') {
+    newField.value.allowedTypes = []
+    newField.value.maxSizeMB = ''
+  }
   
   if (newField.value.type !== 'relationship') {
     newField.value.entity = ''
   }
+
+  validateNewFieldName()
 }
 
 function addOption() {
@@ -538,6 +767,21 @@ function addOption() {
 
 function removeOption(index) {
   newField.value.options.splice(index, 1)
+}
+
+function removeAllowedType(index) {
+  newField.value.allowedTypes.splice(index, 1)
+}
+
+function addCommonAllowedType() {
+  if (!newAllowedTypeSelection.value) return
+  addAllowedTypeValue(newField.value.allowedTypes, newAllowedTypeSelection.value)
+  newAllowedTypeSelection.value = ''
+}
+
+function addCustomAllowedType() {
+  addAllowedTypeValue(newField.value.allowedTypes, newAllowedTypeCustom.value)
+  newAllowedTypeCustom.value = ''
 }
 
 function addField() {
@@ -580,6 +824,24 @@ function addField() {
     
     fieldDef.options = options
   }
+
+  if (newField.value.type === 'file') {
+    if (!isFileFieldName(fieldName)) {
+      toastStore.error('File fields must be named file1, file2, file3, etc.')
+      return
+    }
+
+    const allowedTypes = normalizeAllowedTypes(newField.value.allowedTypes)
+    if (allowedTypes.length > 0) {
+      fieldDef.allowedTypes = allowedTypes
+    }
+
+    const maxSize = mbToBytes(newField.value.maxSizeMB)
+    if (maxSize) {
+      fieldDef.maxSize = maxSize
+    }
+
+  }
   
   // Add to fields array
   fields.value.push({
@@ -596,7 +858,9 @@ function addField() {
     type: 'text',
     readonly: false,
     entity: '',
-    options: []
+    options: [],
+    allowedTypes: [],
+    maxSizeMB: ''
   }
   newFieldErrors.value = {
     name: null,
@@ -635,6 +899,20 @@ function startEditField(field) {
   } else {
     editingFieldOptions.value = []
   }
+
+  if (editingField.value.def.type === 'file') {
+    editingFieldFileMeta.value = {
+      allowedTypes: Array.isArray(editingField.value.def.allowedTypes)
+        ? [...editingField.value.def.allowedTypes]
+        : [],
+      maxSizeMB: bytesToMb(editingField.value.def.maxSize)
+    }
+  } else {
+    editingFieldFileMeta.value = {
+      allowedTypes: [],
+      maxSizeMB: ''
+    }
+  }
   
   // Ensure readonly is a boolean
   if (editingField.value.def.readonly === undefined) {
@@ -658,14 +936,36 @@ function handleEditTypeChange() {
     if (editingField.value.def.entity) {
       delete editingField.value.def.entity
     }
+    delete editingField.value.def.allowedTypes
+    delete editingField.value.def.maxSize
+    delete editingField.value.def.multiple
+    editingFieldFileMeta.value = { allowedTypes: [], maxSizeMB: '' }
   } else if (editingField.value.def.type === 'relationship') {
     editingFieldOptions.value = []
     // Remove options if switching from select
     if (editingField.value.def.options) {
       delete editingField.value.def.options
     }
+    delete editingField.value.def.allowedTypes
+    delete editingField.value.def.maxSize
+    delete editingField.value.def.multiple
+    editingFieldFileMeta.value = { allowedTypes: [], maxSizeMB: '' }
     if (!editingField.value.def.entity) {
       editingField.value.def.entity = ''
+    }
+  } else if (editingField.value.def.type === 'file') {
+    editingFieldOptions.value = []
+    if (editingField.value.def.options) {
+      delete editingField.value.def.options
+    }
+    if (editingField.value.def.entity) {
+      delete editingField.value.def.entity
+    }
+    editingFieldFileMeta.value = {
+      allowedTypes: Array.isArray(editingField.value.def.allowedTypes)
+        ? [...editingField.value.def.allowedTypes]
+        : [],
+      maxSizeMB: bytesToMb(editingField.value.def.maxSize)
     }
   } else {
     editingFieldOptions.value = []
@@ -676,6 +976,10 @@ function handleEditTypeChange() {
     if (editingField.value.def.options) {
       delete editingField.value.def.options
     }
+    delete editingField.value.def.allowedTypes
+    delete editingField.value.def.maxSize
+    delete editingField.value.def.multiple
+    editingFieldFileMeta.value = { allowedTypes: [], maxSizeMB: '' }
   }
 }
 
@@ -687,11 +991,32 @@ function removeEditOption(index) {
   editingFieldOptions.value.splice(index, 1)
 }
 
+function removeEditAllowedType(index) {
+  editingFieldFileMeta.value.allowedTypes.splice(index, 1)
+}
+
+function addEditCommonAllowedType() {
+  if (!editAllowedTypeSelection.value) return
+  addAllowedTypeValue(editingFieldFileMeta.value.allowedTypes, editAllowedTypeSelection.value)
+  editAllowedTypeSelection.value = ''
+}
+
+function addEditCustomAllowedType() {
+  addAllowedTypeValue(editingFieldFileMeta.value.allowedTypes, editAllowedTypeCustom.value)
+  editAllowedTypeCustom.value = ''
+}
+
 function validateEditField() {
   if (editingField.value.def.type === 'relationship' && !editingField.value.def.entity) {
     editFieldErrors.value.entity = 'Please select a related entity'
   } else {
     editFieldErrors.value.entity = null
+  }
+
+  if (editingField.value.def.type === 'file' && !isFileFieldName(editingField.value.name)) {
+    editFieldErrors.value.fileName = 'File fields must be named file1, file2, file3, etc.'
+  } else {
+    editFieldErrors.value.fileName = null
   }
 }
 
@@ -718,6 +1043,29 @@ function saveEditedField() {
     
     editingField.value.def.options = options
   }
+
+  if (editingField.value.def.type === 'file') {
+    if (!isFileFieldName(editingField.value.name)) {
+      toastStore.error('File fields must be named file1, file2, file3, etc.')
+      return
+    }
+
+    const allowedTypes = normalizeAllowedTypes(editingFieldFileMeta.value.allowedTypes)
+    if (allowedTypes.length > 0) {
+      editingField.value.def.allowedTypes = allowedTypes
+    } else {
+      delete editingField.value.def.allowedTypes
+    }
+
+    const maxSize = mbToBytes(editingFieldFileMeta.value.maxSizeMB)
+    if (maxSize) {
+      editingField.value.def.maxSize = maxSize
+    } else {
+      delete editingField.value.def.maxSize
+    }
+
+    delete editingField.value.def.multiple
+  }
   
   // Find and update the field in the fields array
   const index = fields.value.findIndex(f => f.name === editingField.value.name)
@@ -733,13 +1081,15 @@ function saveEditedField() {
   // Clear editing state
   editingField.value = null
   editingFieldOptions.value = []
-  editFieldErrors.value = { entity: null }
+  editingFieldFileMeta.value = { allowedTypes: [], maxSizeMB: '' }
+  editFieldErrors.value = { entity: null, fileName: null }
 }
 
 function cancelEdit() {
   editingField.value = null
   editingFieldOptions.value = []
-  editFieldErrors.value = { entity: null }
+  editingFieldFileMeta.value = { allowedTypes: [], maxSizeMB: '' }
+  editFieldErrors.value = { entity: null, fileName: null }
 }
 
 async function saveFields() {

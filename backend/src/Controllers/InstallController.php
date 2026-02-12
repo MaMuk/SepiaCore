@@ -424,6 +424,24 @@ class InstallController extends BaseController
             });
         }
 
+        // Files table
+        if (!Capsule::schema()->hasTable('files')) {
+            Capsule::schema()->create('files', function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('name')->nullable();
+                $table->string('path');
+                $table->string('original_name')->nullable();
+                $table->integer('size')->nullable();
+                $table->string('mime_type')->nullable();
+                $table->string('extension')->nullable();
+                $table->uuid('owner')->nullable()->index();
+                $table->timestamp('date_created')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+                $table->timestamp('date_modified')->default(Capsule::raw('CURRENT_TIMESTAMP'));
+
+                $table->foreign('owner')->references('id')->on('users')->onDelete('cascade');
+            });
+        }
+
         // --- 3. Insert admin user via your Entity class ---
         $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
         $users = $this->getEntityClass('users');
@@ -818,6 +836,21 @@ class InstallController extends BaseController
                                 'active' => 'true',
                                 'requires_admin' => true,
                             ],
+                        'list-widget' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                        'graph-widget' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'tokens' => [
@@ -844,6 +877,21 @@ class InstallController extends BaseController
                                 'requires_admin' => true,
                             ],
                         'list-filter-suggestions' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'list-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'graph-widget' =>
                             [
                                 'active' => 'false',
                                 'requires_admin' => true,
@@ -898,6 +946,21 @@ class InstallController extends BaseController
                                 'active' => 'true',
                                 'requires_admin' => true,
                             ],
+                        'list-widget' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
+                        'graph-widget' =>
+                            [
+                                'active' => 'true',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'rawendpointdata' => [
@@ -929,6 +992,21 @@ class InstallController extends BaseController
                                 'active' => 'false',
                                 'requires_admin' => true,
                             ],
+                        'list-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'graph-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
                 'dashboards' => [
@@ -948,6 +1026,21 @@ class InstallController extends BaseController
                                 'requires_admin' => false,
                             ],
                         'list-filter-suggestions' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'list-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'graph-widget' =>
                             [
                                 'active' => 'false',
                                 'requires_admin' => false,
@@ -990,7 +1083,54 @@ class InstallController extends BaseController
                                 'active' => 'false',
                                 'requires_admin' => false,
                             ],
+                        'list-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
+                        'graph-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => false,
+                            ],
                     ]
+                ],
+                'files' => [
+                    'fields' => [
+                        'id' => ['type' => 'uuid'],
+                        'name' => ['type' => 'string'],
+                        'path' => ['type' => 'string'],
+                        'size' => ['type' => 'integer'],
+                        'mime_type' => ['type' => 'string'],
+                        'extension' => ['type' => 'string'],
+                        'owner' => ['type' => 'relationship', 'entity' => 'users'],
+                        'date_created' => ['type' => 'datetime', 'readonly' => true],
+                        'date_modified' => ['type' => 'datetime', 'readonly' => true],
+                    ],
+                    'module_views' => [
+                        'record' => [
+                            'layout' => [
+                                ['name', 'owner'],
+                                ['mime_type', 'size'],
+                                ['date_created', 'date_modified'],
+                            ],
+                        ],
+                        'list' => [
+                            'isdefault' => true,
+                            'layout' => [
+                                'name',
+                                'mime_type',
+                                'size',
+                                'date_created',
+                            ],
+                        ],
+                        'subpanels' => [],
+                    ],
                 ],
                 'modulebuilder' => [
                     'module_views' => [
@@ -1007,6 +1147,21 @@ class InstallController extends BaseController
                                 'active' => 'false',
                                 'requires_admin' => true,
                             ],
+                        'list-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'quick-form' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
+                        'graph-widget' =>
+                            [
+                                'active' => 'false',
+                                'requires_admin' => true,
+                            ],
                     ]
                 ],
             ],
@@ -1017,6 +1172,7 @@ class InstallController extends BaseController
                 'rawendpointdata',
                 'dashboards',
                 'saved_filters',
+                'files',
                 'modulebuilder',
             ],
             'navigation_entities' => [],
